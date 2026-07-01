@@ -8,7 +8,7 @@ Built with **WXT + React + TypeScript + Tailwind CSS + Zustand**.
 
 ---
 
-## ✨ Features
+## Features
 
 - **Request Builder** — `GET` `POST` `PUT` `PATCH` `DELETE` `OPTIONS` `HEAD`
   - Query params (kept in sync with the URL), dynamic headers with suggestions
@@ -27,7 +27,7 @@ Built with **WXT + React + TypeScript + Tailwind CSS + Zustand**.
 
 ---
 
-## 🧱 Tech Stack
+##  Tech Stack
 
 | Area | Choice |
 | --- | --- |
@@ -39,7 +39,7 @@ Built with **WXT + React + TypeScript + Tailwind CSS + Zustand**.
 
 ---
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### Prerequisites
 
@@ -94,7 +94,7 @@ npm run zip            # zipped, store-ready bundle
 
 ---
 
-## ⌨️ Keyboard Shortcuts
+## Keyboard Shortcuts
 
 | Action | Shortcut |
 | --- | --- |
@@ -106,7 +106,7 @@ npm run zip            # zipped, store-ready bundle
 
 ---
 
-## 🧭 Usage
+## Usage
 
 **Environment variables** — create an environment in the sidebar, add `base_url`, `token`, `api_key`, etc., then select it from the top bar. Reference them anywhere with `{{base_url}}/users`. Variables are resolved just before the request is sent and in the generated cURL/code.
 
@@ -118,7 +118,7 @@ npm run zip            # zipped, store-ready bundle
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 src/
@@ -154,7 +154,7 @@ The folder structure and the `PreparedRequest` abstraction make it straightforwa
 
 ---
 
-## 📜 Scripts
+## Scripts
 
 | Script | Description |
 | --- | --- |

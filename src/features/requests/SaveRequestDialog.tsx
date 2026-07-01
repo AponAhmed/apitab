@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useCollectionStore } from '@/stores/collectionStore';
 import { useRequestStore } from '@/stores/requestStore';
 import { useDialogStore } from '@/stores/dialogStore';
@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
+import { flattenContainers } from '@/utils/collectionTree';
 
 const NEW = '__new__';
 
@@ -18,24 +19,25 @@ export function SaveRequestDialog() {
   const saveToCollection = useRequestStore((s) => s.saveToCollection);
   const requestName = useRequestStore((s) => s.request.name);
 
+  const targets = useMemo(() => flattenContainers(collections), [collections]);
+
   const [name, setName] = useState('');
-  const [collectionId, setCollectionId] = useState<string>(NEW);
+  const [target, setTarget] = useState<string>(NEW);
   const [newCollectionName, setNewCollectionName] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setName(requestName || 'Untitled Request');
-    setCollectionId(collections[0]?.id ?? NEW);
+    setTarget(targets[0]?.id ?? NEW);
     setNewCollectionName('');
-  }, [open, requestName, collections]);
+  }, [open, requestName, targets]);
 
-  const isNew = collectionId === NEW;
+  const isNew = target === NEW;
   const canSave = name.trim() !== '' && (!isNew || newCollectionName.trim() !== '');
 
   const submit = () => {
     if (!canSave) return;
-    let targetId = collectionId;
-    if (isNew) targetId = createCollection(newCollectionName).id;
+    const targetId = isNew ? createCollection(newCollectionName).id : target;
     saveToCollection(targetId, name);
     toast.success('Request saved');
     close();
@@ -73,12 +75,12 @@ export function SaveRequestDialog() {
 
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
-            Collection
+            Save to
           </span>
-          <Select value={collectionId} onChange={(e) => setCollectionId(e.target.value)}>
-            {collections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
+          <Select value={target} onChange={(e) => setTarget(e.target.value)}>
+            {targets.map((t) => (
+              <option key={t.id} value={t.id}>
+                {`${'  '.repeat(t.depth)}${t.isCollection ? '' : '↳ '}${t.name}`}
               </option>
             ))}
             <option value={NEW}>+ New collection…</option>

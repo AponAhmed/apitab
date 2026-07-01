@@ -4,6 +4,7 @@ import type {
   AuthConfig,
   KeyValue,
   RequestBody,
+  RequestScripts,
 } from '@/types';
 
 /** A blank, enabled key/value row. */
@@ -30,6 +31,10 @@ export function defaultBody(): RequestBody {
   };
 }
 
+export function defaultScripts(): RequestScripts {
+  return { preRequest: '', postResponse: '' };
+}
+
 /** Creates a fresh request draft, optionally seeded with partial fields. */
 export function createRequest(partial: Partial<ApiRequest> = {}): ApiRequest {
   const now = Date.now();
@@ -42,6 +47,7 @@ export function createRequest(partial: Partial<ApiRequest> = {}): ApiRequest {
     headers: [emptyKeyValue()],
     auth: defaultAuth(),
     body: defaultBody(),
+    scripts: defaultScripts(),
     createdAt: now,
     updatedAt: now,
     ...partial,

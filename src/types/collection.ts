@@ -1,13 +1,25 @@
 import type { ApiRequest } from './request';
 
+/** A nestable folder: holds sub-folders and requests. */
+export interface CollectionFolder {
+  id: string;
+  name: string;
+  folders: CollectionFolder[];
+  requests: ApiRequest[];
+}
+
 /**
- * A named group of saved requests. Requests are embedded (local-first) so a
- * collection is fully self-contained for export/import.
+ * A named tree of folders and requests. The collection itself acts as the root
+ * container (its `id` addresses the root level).
  */
 export interface Collection {
   id: string;
   name: string;
+  folders: CollectionFolder[];
   requests: ApiRequest[];
   createdAt: number;
   updatedAt: number;
 }
+
+/** Anything that holds folders + requests — a collection root or a folder. */
+export type Container = Collection | CollectionFolder;
