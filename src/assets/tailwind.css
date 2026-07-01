@@ -1,0 +1,71 @@
+@import 'tailwindcss';
+
+/* Class-based dark mode: utilities prefixed with `dark:` apply when an
+   ancestor (we use <html>) carries the `.dark` class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Amber/gold accent, matching the lightning-bolt app icon. */
+  --color-brand-50: #fffbeb;
+  --color-brand-100: #fef3c7;
+  --color-brand-200: #fde68a;
+  --color-brand-300: #fcd34d;
+  --color-brand-400: #fbbf24;
+  --color-brand-500: #f59e0b;
+  --color-brand-600: #d97706;
+  --color-brand-700: #b45309;
+  --color-brand-800: #92400e;
+  --color-brand-900: #78350f;
+
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+}
+
+@layer base {
+  /* Tell the browser to theme native UI (dropdowns, scrollbars, number
+     spinners, autofill, caret) to match the active theme. */
+  :root {
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+      Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    @apply bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-200;
+  }
+
+  /* Tailwind v4 defaults borders to currentColor; restore a subtle default. */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-slate-200);
+  }
+  .dark *,
+  .dark ::before,
+  .dark ::after {
+    border-color: var(--color-slate-800);
+  }
+
+  /* Thin, theme-aware scrollbars */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300 dark:bg-slate-700;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
