@@ -8,6 +8,7 @@ import { ResponseBody } from './response/ResponseBody';
 import { ResponseHeadersView } from './response/ResponseHeadersView';
 import { CurlView } from './response/CurlView';
 import { CodeView } from './response/CodeView';
+import { TestResultsView } from './response/TestResultsView';
 import { formatBytes, formatDuration } from '@/utils/format';
 import type { ApiErrorType } from '@/types';
 
@@ -55,14 +56,25 @@ function ResponseTabContent() {
 
 export function ResponsePanel() {
   const response = useRequestStore((s) => s.response);
+  const scriptRun = useRequestStore((s) => s.scriptRun);
   const tab = useRequestStore((s) => s.activeResponseTab);
   const setTab = useRequestStore((s) => s.setResponseTab);
+
+  const allTests = [
+    ...(scriptRun?.pre?.tests ?? []),
+    ...(scriptRun?.post?.tests ?? []),
+  ];
+  const testsBadge =
+    allTests.length > 0
+      ? `${allTests.filter((t) => t.passed).length}/${allTests.length}`
+      : undefined;
 
   const tabs: TabItem<ResponseTab>[] = [
     { id: 'body', label: 'Response' },
     { id: 'headers', label: 'Headers', badge: response?.headers.length || undefined },
     { id: 'curl', label: 'cURL' },
     { id: 'code', label: 'Code' },
+    { id: 'tests', label: 'Tests', badge: testsBadge },
   ];
 
   return (
@@ -94,6 +106,7 @@ export function ResponsePanel() {
           ))}
         {tab === 'curl' && <CurlView />}
         {tab === 'code' && <CodeView />}
+        {tab === 'tests' && <TestResultsView />}
       </div>
     </div>
   );

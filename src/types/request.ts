@@ -53,6 +53,13 @@ export interface AuthConfig {
   apiKey: ApiKeyAuth;
 }
 
+export interface RequestScripts {
+  /** JavaScript run before the request is sent. */
+  preRequest: string;
+  /** JavaScript run after the response arrives (tests / assertions). */
+  postResponse: string;
+}
+
 export type BodyType = 'none' | 'json' | 'raw' | 'form-urlencoded' | 'form-data';
 
 export interface RequestBody {
@@ -75,12 +82,14 @@ export interface ApiRequest {
   headers: KeyValue[];
   auth: AuthConfig;
   body: RequestBody;
+  scripts: RequestScripts;
   createdAt: number;
   updatedAt: number;
 }
 
-/** Identifies a saved request inside a collection (for "Update request"). */
+/** Identifies a saved request inside a collection/folder (for "Update request"). */
 export interface SavedRequestRef {
-  collectionId: string;
+  /** The collection or folder that holds the request. */
+  containerId: string;
   requestId: string;
 }

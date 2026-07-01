@@ -5,6 +5,7 @@ import { ParamsTab } from './tabs/ParamsTab';
 import { HeadersTab } from './tabs/HeadersTab';
 import { AuthTab } from './tabs/AuthTab';
 import { BodyTab } from './tabs/BodyTab';
+import { ScriptsTab } from './tabs/ScriptsTab';
 
 function ActiveDot() {
   return <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />;
@@ -17,6 +18,9 @@ export function RequestEditor() {
   const headers = useRequestStore((s) => s.request.headers);
   const authType = useRequestStore((s) => s.request.auth.type);
   const bodyType = useRequestStore((s) => s.request.body.type);
+  const hasScripts = useRequestStore(
+    (s) => s.request.scripts.preRequest.trim() !== '' || s.request.scripts.postResponse.trim() !== '',
+  );
 
   const paramCount = useMemo(
     () => params.filter((p) => p.enabled && p.key.trim() !== '').length,
@@ -42,6 +46,12 @@ export function RequestEditor() {
         <span className="flex items-center gap-1.5">Body {bodyType !== 'none' && <ActiveDot />}</span>
       ),
     },
+    {
+      id: 'scripts',
+      label: (
+        <span className="flex items-center gap-1.5">Scripts {hasScripts && <ActiveDot />}</span>
+      ),
+    },
   ];
 
   return (
@@ -52,6 +62,7 @@ export function RequestEditor() {
         {active === 'headers' && <HeadersTab />}
         {active === 'auth' && <AuthTab />}
         {active === 'body' && <BodyTab />}
+        {active === 'scripts' && <ScriptsTab />}
       </div>
     </div>
   );

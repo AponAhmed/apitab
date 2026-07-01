@@ -22,6 +22,13 @@ export default defineConfig({
         description: 'Open the ApiTab workspace',
       },
     },
+    // Sandbox page runs user pre-request/post-response scripts (needs eval,
+    // which extension pages forbid).
+    sandbox: { pages: ['sandbox.html'] },
+    content_security_policy: {
+      sandbox:
+        "sandbox allow-scripts allow-forms; script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'self';",
+    },
   },
   // Allow headless dev (no auto-launched browser) via WXT_HEADLESS=1.
   webExt: {

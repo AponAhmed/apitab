@@ -4,7 +4,8 @@ import { createRequest, emptyKeyValue } from '@/utils/defaults';
 import { formatJson } from '@/utils/json';
 import { paramsFromUrl, urlWithParams } from '@/utils/query';
 import { uuid } from '@/utils/id';
-import { executeRequest } from '@/services/requestService';
+import { executeRequest, prepareRequest } from '@/services/requestService';
+import { runScript } from '@/services/scriptRunner';
 import { parseCurl, type ParseCurlResult } from '@/utils/curl';
 import { browserLocalStorage } from './persist';
 import { useEnvironmentStore } from './environmentStore';
@@ -19,11 +20,38 @@ import type {
   BodyType,
   HttpMethod,
   KeyValue,
+  PreparedHeader,
   SavedRequestRef,
+  ScriptRunResult,
 } from '@/types';
+import type { VariableMap } from '@/utils/variables';
 
-export type RequestTab = 'params' | 'headers' | 'auth' | 'body';
-export type ResponseTab = 'body' | 'headers' | 'curl' | 'code';
+export type RequestTab = 'params' | 'headers' | 'auth' | 'body' | 'scripts';
+export type ResponseTab = 'body' | 'headers' | 'curl' | 'code' | 'tests';
+
+function headersToRecord(headers: PreparedHeader[]): Record<string, string> {
+  const record: Record<string, string> = {};
+  for (const h of headers) record[h.key] = h.value;
+  return record;
+}
+
+/** Applies a script's env updates to the working vars and the active environment. */
+function applyEnvUpdates(
+  vars: VariableMap,
+  updates: Record<string, string | null>,
+  activeEnvId: string | null,
+): VariableMap {
+  const next = { ...vars };
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === null) {
+      delete next[key];
+    } else {
+      next[key] = value;
+      if (activeEnvId) useEnvironmentStore.getState().upsertVariable(activeEnvId, key, value);
+    }
+  }
+  return next;
+}
 
 /** Ensures a key/value list always ends with one blank row for quick entry. */
 function withTrailingRow(rows: KeyValue[]): KeyValue[] {
@@ -50,6 +78,10 @@ function normalizeForEditing(req: ApiRequest): ApiRequest {
       formUrlEncoded: withTrailingRow(req.body?.formUrlEncoded ?? []),
       formData: withTrailingRow(req.body?.formData ?? []),
     },
+    scripts: {
+      preRequest: req.scripts?.preRequest ?? '',
+      postResponse: req.scripts?.postResponse ?? '',
+    },
     params: withTrailingRow(req.params ?? []),
     headers: withTrailingRow(req.headers ?? []),
   };
@@ -63,6 +95,7 @@ interface RequestState {
   isLoading: boolean;
   sentAt: number | null;
   savedRef: SavedRequestRef | null;
+  scriptRun: ScriptRunResult | null;
   activeRequestTab: RequestTab;
   activeResponseTab: ResponseTab;
 
@@ -90,6 +123,10 @@ interface RequestState {
   setJsonBody: (json: string) => void;
   setRawBody: (raw: string) => void;
   formatJsonBody: () => void;
+
+  // Scripts
+  setPreRequestScript: (code: string) => void;
+  setPostResponseScript: (code: string) => void;
   updateFormUrlEncoded: (id: string, patch: Partial<KeyValue>) => void;
   removeFormUrlEncoded: (id: string) => void;
   updateFormData: (id: string, patch: Partial<KeyValue>) => void;
@@ -121,6 +158,7 @@ export const useRequestStore = create<RequestState>()(
         isLoading: false,
         sentAt: null,
         savedRef: null,
+        scriptRun: null,
         activeRequestTab: 'params',
         activeResponseTab: 'body',
 
@@ -176,6 +214,11 @@ export const useRequestStore = create<RequestState>()(
             return result.ok ? { ...r, body: { ...r.body, json: result.value } } : r;
           }),
 
+        setPreRequestScript: (code) =>
+          patch((r) => ({ ...r, scripts: { ...r.scripts, preRequest: code } })),
+        setPostResponseScript: (code) =>
+          patch((r) => ({ ...r, scripts: { ...r.scripts, postResponse: code } })),
+
         updateFormUrlEncoded: (id, p) =>
           patch((r) => ({
             ...r,
@@ -219,24 +262,71 @@ export const useRequestStore = create<RequestState>()(
         send: async () => {
           const { request } = get();
           if (get().isLoading) return;
-          set({ isLoading: true, error: null });
+          set({ isLoading: true, error: null, scriptRun: null });
 
-          const vars = useEnvironmentStore.getState().getActiveVariables();
+          const envStore = useEnvironmentStore.getState();
+          const activeEnvId = envStore.activeEnvironmentId;
+          let vars = { ...envStore.getActiveVariables() };
           const timeout = useSettingsStore.getState().requestTimeoutMs;
+          const scriptRun: ScriptRunResult = {};
 
           try {
-            const { prepared, result } = await executeRequest(request, vars, timeout);
-            if (result.ok) {
-              set({
-                response: result.response,
-                error: null,
-                isLoading: false,
-                sentAt: Date.now(),
-                activeResponseTab: 'body',
+            // Pre-request script (may set environment variables used below).
+            if (request.scripts.preRequest.trim()) {
+              const preview = prepareRequest(request, vars);
+              scriptRun.pre = await runScript(request.scripts.preRequest, {
+                request: {
+                  method: preview.method,
+                  url: preview.url,
+                  headers: headersToRecord(preview.headers),
+                },
+                environment: vars,
               });
-            } else {
-              set({ response: null, error: result.error, isLoading: false, sentAt: Date.now() });
+              vars = applyEnvUpdates(vars, scriptRun.pre.envUpdates, activeEnvId);
             }
+
+            const { prepared, result } = await executeRequest(request, vars, timeout);
+
+            if (result.ok) {
+              set({ response: result.response, error: null, sentAt: Date.now() });
+
+              // Post-response script (tests / assertions).
+              if (request.scripts.postResponse.trim()) {
+                scriptRun.post = await runScript(request.scripts.postResponse, {
+                  request: {
+                    method: prepared.method,
+                    url: prepared.url,
+                    headers: headersToRecord(prepared.headers),
+                  },
+                  response: {
+                    status: result.response.status,
+                    statusText: result.response.statusText,
+                    headers: result.response.headers,
+                    body: result.response.body,
+                    timeMs: result.response.timeMs,
+                    sizeBytes: result.response.sizeBytes,
+                  },
+                  environment: vars,
+                });
+                vars = applyEnvUpdates(vars, scriptRun.post.envUpdates, activeEnvId);
+              }
+            } else {
+              set({ response: null, error: result.error, sentAt: Date.now() });
+            }
+
+            const hasScriptOutput = Boolean(scriptRun.pre || scriptRun.post);
+            const showTests = Boolean(
+              scriptRun.pre?.error ||
+                scriptRun.post?.error ||
+                scriptRun.pre?.tests.length ||
+                scriptRun.post?.tests.length,
+            );
+            set({
+              isLoading: false,
+              scriptRun: hasScriptOutput ? scriptRun : null,
+              activeResponseTab: showTests ? 'tests' : result.ok ? 'body' : get().activeResponseTab,
+            });
+
             useHistoryStore.getState().addEntry(
               {
                 id: uuid(),
@@ -253,6 +343,7 @@ export const useRequestStore = create<RequestState>()(
               response: null,
               error: { type: 'unknown', message: (err as Error).message },
               isLoading: false,
+              scriptRun: scriptRun.pre || scriptRun.post ? scriptRun : null,
               sentAt: Date.now(),
             });
           }
@@ -266,6 +357,7 @@ export const useRequestStore = create<RequestState>()(
             error: null,
             isLoading: false,
             sentAt: null,
+            scriptRun: null,
           }),
 
         loadRequest: (req, savedRef = null) =>
@@ -276,6 +368,7 @@ export const useRequestStore = create<RequestState>()(
             error: null,
             isLoading: false,
             sentAt: null,
+            scriptRun: null,
           }),
 
         importCurl: (text) => {
@@ -284,13 +377,13 @@ export const useRequestStore = create<RequestState>()(
           return result;
         },
 
-        saveToCollection: (collectionId, name) => {
+        saveToCollection: (containerId, name) => {
           const saved = useCollectionStore
             .getState()
-            .addRequest(collectionId, get().request, name);
+            .addRequest(containerId, get().request, name);
           if (saved) {
             set((s) => ({
-              savedRef: { collectionId, requestId: saved.id },
+              savedRef: { containerId, requestId: saved.id },
               request: { ...s.request, name: saved.name },
             }));
           }
@@ -300,9 +393,7 @@ export const useRequestStore = create<RequestState>()(
         updateSaved: () => {
           const { savedRef, request } = get();
           if (!savedRef) return false;
-          useCollectionStore
-            .getState()
-            .updateRequest(savedRef.collectionId, { ...request, id: savedRef.requestId });
+          useCollectionStore.getState().updateRequest({ ...request, id: savedRef.requestId });
           return true;
         },
       };
