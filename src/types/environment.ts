@@ -5,7 +5,11 @@ export interface EnvVariable {
   enabled: boolean;
 }
 
-/** A named set of variables, e.g. Development / Staging / Production. */
+/**
+ * A named set of variables, e.g. Development / Staging / Production.
+ * Environments are always local-only — they typically hold secrets
+ * (tokens, API keys) and are never synced to the team server.
+ */
 export interface Environment {
   id: string;
   name: string;

@@ -3,6 +3,7 @@ import { useApplyTheme } from '@/hooks/useApplyTheme';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useRequestActions } from '@/hooks/useRequestActions';
 import { usePanelResize, useHorizontalResize } from '@/hooks/usePanelResize';
+import { useTeamSync } from '@/hooks/useTeamSync';
 import { TopBar } from './TopBar';
 import { Sidebar, SidebarRail } from './Sidebar';
 import { RequestToolbar } from '@/features/requests/RequestToolbar';
@@ -14,6 +15,7 @@ import { Toaster } from '@/components/Toaster';
 
 export function Workspace() {
   useApplyTheme();
+  useTeamSync();
 
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const responseHeight = useUiStore((s) => s.responseHeight);

@@ -10,9 +10,11 @@ import {
   Search,
   Trash2,
   Upload,
+  Users,
 } from 'lucide-react';
 import { useCollectionStore } from '@/stores/collectionStore';
 import { useRequestStore } from '@/stores/requestStore';
+import { useDialogStore } from '@/stores/dialogStore';
 import { toast } from '@/stores/toastStore';
 import { IconButton } from '@/components/ui/IconButton';
 import { Menu, type MenuItem } from '@/components/ui/Menu';
@@ -20,6 +22,7 @@ import { MethodBadge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PromptDialog } from '@/components/PromptDialog';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { ShareToTeamDialog } from './ShareToTeamDialog';
 import { cn } from '@/utils/cn';
 import { countRequests, isCollection } from '@/utils/collectionTree';
 import { exportContainer, parseCollectionExport, sanitizeFilename } from '@/utils/collectionIO';
@@ -37,6 +40,7 @@ interface CollectionActions {
   importInto: (containerId: string) => void;
   duplicateRequest: (id: string) => void;
   deleteRequest: (req: ApiRequest) => void;
+  shareToTeam: (collectionId: string) => void;
 }
 
 const ActionsContext = createContext<CollectionActions | null>(null);
@@ -95,6 +99,7 @@ function ContainerNode({
 }) {
   const actions = useActions();
   const root = isCollection(container);
+  const teamId = root ? (container as Collection).teamId : undefined;
   const isCollapsed = !!collapsed[container.id];
   const empty = container.folders.length === 0 && container.requests.length === 0;
 
@@ -104,6 +109,9 @@ function ContainerNode({
     { label: 'Duplicate', icon: Copy, onClick: () => actions.duplicate(container.id) },
     { label: 'Export', icon: Download, separatorBefore: true, onClick: () => actions.exportItem(container) },
     { label: 'Import here', icon: Upload, onClick: () => actions.importInto(container.id) },
+    ...(root && !teamId
+      ? [{ label: 'Share to team…', icon: Users, onClick: () => actions.shareToTeam(container.id) }]
+      : []),
     {
       label: root ? 'Delete collection' : 'Delete folder',
       icon: Trash2,
@@ -137,6 +145,11 @@ function ContainerNode({
           >
             {container.name}
           </span>
+          {teamId && (
+            <span title="Shared with team" className="shrink-0">
+              <Users className="h-3 w-3 text-brand-500" />
+            </span>
+          )}
           <span className="shrink-0 text-[10px] text-slate-400">{countRequests(container)}</span>
         </button>
         <div className="opacity-0 group-hover:opacity-100">
@@ -189,6 +202,7 @@ export function CollectionsPanel() {
 
   const loadRequest = useRequestStore((s) => s.loadRequest);
   const activeRequestId = useRequestStore((s) => s.savedRef?.requestId ?? null);
+  const openShareToTeam = useDialogStore((s) => s.openShareToTeam);
 
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -232,6 +246,7 @@ export function CollectionsPanel() {
     },
     duplicateRequest,
     deleteRequest: (req) => setDeleteTarget({ id: req.id, name: req.name, kind: 'request' }),
+    shareToTeam: (collectionId) => openShareToTeam(collectionId),
   };
 
   const onFile = async (file: File) => {
@@ -351,6 +366,7 @@ export function CollectionsPanel() {
         }}
         onClose={() => setDeleteTarget(null)}
       />
+      <ShareToTeamDialog />
     </div>
   );
 }

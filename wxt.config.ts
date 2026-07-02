@@ -9,9 +9,12 @@ export default defineConfig({
     name: 'ApiTab',
     description:
       'Lightweight, local-first API testing tool — a fast, minimal alternative to Postman.',
-    // `storage` for persistence; host permissions let the background worker
-    // perform cross-origin API requests without CORS restrictions.
-    permissions: ['storage'],
+    // `storage` for persistence; `alarms` drives the periodic team-sync poll
+    // (survives service worker suspension, unlike setInterval). Host
+    // permissions let extension pages perform cross-origin API requests
+    // (both the user's tested APIs and the team-sync backend) without CORS
+    // restrictions.
+    permissions: ['storage', 'alarms'],
     host_permissions: ['<all_urls>'],
     action: {
       default_title: 'ApiTab — Open API tester',
