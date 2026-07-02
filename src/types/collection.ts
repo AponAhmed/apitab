@@ -19,6 +19,8 @@ export interface Collection {
   requests: ApiRequest[];
   createdAt: number;
   updatedAt: number;
+  /** Set when this collection is shared with a team; absent = local-only. */
+  teamId?: string;
 }
 
 /** Anything that holds folders + requests — a collection root or a folder. */

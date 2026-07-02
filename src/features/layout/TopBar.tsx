@@ -6,6 +6,8 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { Logo } from '@/components/Logo';
 import { AboutDialog } from '@/components/AboutDialog';
 import { EnvironmentSelector } from '@/features/environments/EnvironmentSelector';
+import { AccountMenu } from '@/features/account/AccountMenu';
+import { LoginDialog } from '@/features/account/LoginDialog';
 
 export function TopBar() {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
@@ -27,6 +29,7 @@ export function TopBar() {
       <div className="flex-1" />
 
       <EnvironmentSelector />
+      <AccountMenu />
       <ThemeToggle />
       <IconButton title="About" aria-label="About ApiTab" onClick={() => setAboutOpen(true)}>
         <Info className="h-4 w-4" />
@@ -40,6 +43,7 @@ export function TopBar() {
       </IconButton>
 
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <LoginDialog />
     </header>
   );
 }
