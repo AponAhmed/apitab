@@ -1,6 +1,6 @@
 import { uuid } from './id';
 import { cloneRequest } from './defaults';
-import type { Collection, CollectionFolder, Container } from '@/types';
+import type { ApiRequest, Collection, CollectionFolder, Container, KeyValue } from '@/types';
 
 export function isCollection(container: Container): container is Collection {
   return 'createdAt' in container;
@@ -10,12 +10,30 @@ export function newFolder(name: string): CollectionFolder {
   return { id: uuid(), name: name.trim() || 'New Folder', folders: [], requests: [] };
 }
 
-/** Backfills missing `folders`/`requests` on legacy persisted data. */
+/** Coerces possibly-corrupted (e.g. null from legacy/synced data) fields to safe strings. */
+function sanitizeRows(rows: KeyValue[] | undefined): KeyValue[] {
+  return (rows ?? []).map((r) => ({ ...r, key: r.key ?? '', value: r.value ?? '', enabled: r.enabled ?? true }));
+}
+
+function sanitizeApiRequest(req: ApiRequest): ApiRequest {
+  return {
+    ...req,
+    params: sanitizeRows(req.params),
+    headers: sanitizeRows(req.headers),
+    body: {
+      ...req.body,
+      formUrlEncoded: sanitizeRows(req.body?.formUrlEncoded),
+      formData: sanitizeRows(req.body?.formData),
+    },
+  };
+}
+
+/** Backfills missing `folders`/`requests` and sanitizes corrupted key/value fields on legacy persisted data. */
 export function normalizeContainer<T extends Container>(container: T): T {
   return {
     ...container,
     folders: (container.folders ?? []).map(normalizeContainer),
-    requests: container.requests ?? [],
+    requests: (container.requests ?? []).map(sanitizeApiRequest),
   };
 }
 

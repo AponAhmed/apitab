@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { Download, LogIn, LogOut, Monitor, Moon, RefreshCw, Sun, Trash2, Upload, Users } from 'lucide-react';
+import { Download, KeyRound, LogIn, LogOut, Monitor, Moon, RefreshCw, Sun, Trash2, Upload, Users } from 'lucide-react';
 import { useApplyTheme } from '@/hooks/useApplyTheme';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useCollectionStore } from '@/stores/collectionStore';
@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/Input';
 import { Logo } from '@/components/Logo';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoginDialog } from '@/features/account/LoginDialog';
+import { ChangePasswordDialog } from '@/features/account/ChangePasswordDialog';
 import { ABOUT } from '@/config/about';
 import { ExternalLink, GitBranch, Mail } from 'lucide-react';
 import {
@@ -83,6 +84,7 @@ export function OptionsPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [clearOpen, setClearOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   const exportData = () => {
     const data = buildBackup({
@@ -203,10 +205,16 @@ export function OptionsPage() {
                       {session.user.email}
                     </p>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => void logout()}>
-                    <LogOut className="h-3.5 w-3.5" />
-                    Log out
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button variant="ghost" size="sm" onClick={() => setChangePasswordOpen(true)}>
+                      <KeyRound className="h-3.5 w-3.5" />
+                      Change password
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => void logout()}>
+                      <LogOut className="h-3.5 w-3.5" />
+                      Log out
+                    </Button>
+                  </div>
                 </div>
 
                 <div>
@@ -369,6 +377,7 @@ export function OptionsPage() {
         onClose={() => setClearOpen(false)}
       />
       <LoginDialog />
+      <ChangePasswordDialog open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
       <Toaster />
     </div>
   );

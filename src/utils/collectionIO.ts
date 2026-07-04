@@ -3,6 +3,11 @@ import type { Collection, CollectionFolder, Container } from '@/types';
 
 export const COLLECTION_EXPORT_VERSION = 1;
 
+export interface SharedVariable {
+  key: string;
+  value: string;
+}
+
 /** Serialized single collection or folder (folder-level export/import). */
 export interface CollectionExport {
   app: 'apitab';
@@ -10,15 +15,25 @@ export interface CollectionExport {
   version: number;
   exportedAt: number;
   item: Container;
+  /**
+   * Environment variables the user explicitly opted into sharing (with
+   * values). Omitted/empty when nothing was marked shareable — an export
+   * never carries environment data unless the user asked for it.
+   */
+  environmentVariables?: SharedVariable[];
 }
 
-export function exportContainer(container: Container): CollectionExport {
+export function exportContainer(
+  container: Container,
+  environmentVariables?: SharedVariable[],
+): CollectionExport {
   return {
     app: 'apitab',
     type: isCollection(container) ? 'collection' : 'folder',
     version: COLLECTION_EXPORT_VERSION,
     exportedAt: Date.now(),
     item: container,
+    ...(environmentVariables?.length ? { environmentVariables } : {}),
   };
 }
 
@@ -39,6 +54,12 @@ export function parseCollectionExport(raw: string): ParsedExport {
   if (obj?.app !== 'apitab' || !obj.item || typeof obj.item !== 'object') {
     return { ok: false, error: 'Not a valid ApiTab collection/folder file.' };
   }
+  const rawVars = Array.isArray(obj.environmentVariables) ? obj.environmentVariables : [];
+  const environmentVariables = rawVars.filter(
+    (v): v is SharedVariable =>
+      v != null && typeof v.key === 'string' && v.key.trim() !== '' && typeof v.value === 'string',
+  );
+
   return {
     ok: true,
     data: {
@@ -47,6 +68,7 @@ export function parseCollectionExport(raw: string): ParsedExport {
       version: obj.version ?? COLLECTION_EXPORT_VERSION,
       exportedAt: obj.exportedAt ?? Date.now(),
       item: normalizeContainer(obj.item as Container),
+      ...(environmentVariables.length ? { environmentVariables } : {}),
     },
   };
 }

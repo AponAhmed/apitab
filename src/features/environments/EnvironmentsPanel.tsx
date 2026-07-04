@@ -7,6 +7,7 @@ import {
   Globe,
   Pencil,
   Plus,
+  Share2,
   Trash2,
 } from 'lucide-react';
 import { useEnvironmentStore } from '@/stores/environmentStore';
@@ -17,6 +18,10 @@ import { PromptDialog } from '@/components/PromptDialog';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { cn } from '@/utils/cn';
 import type { Environment } from '@/types';
+
+function sharedIds(env: Environment): Set<string> {
+  return new Set(env.variables.filter((v) => v.shared).map((v) => v.id));
+}
 
 export function EnvironmentsPanel() {
   const environments = useEnvironmentStore((s) => s.environments);
@@ -104,7 +109,19 @@ export function EnvironmentsPanel() {
                       keyPlaceholder="Variable"
                       valuePlaceholder="Value"
                       enableVariables={false}
+                      columnRatio={['0.75fr', '1.25fr']}
+                      showShareToggle
+                      sharedIds={sharedIds(env)}
+                      onToggleShared={(id) => {
+                        const v = env.variables.find((x) => x.id === id);
+                        updateVariable(env.id, id, { shared: !v?.shared });
+                      }}
                     />
+                    <p className="mt-1.5 flex items-center gap-1 px-0.5 text-[11px] text-slate-400">
+                      <Share2 className="h-3 w-3 shrink-0" />
+                      Toggle the share icon to include a variable (with its value) when you export
+                      or share a collection.
+                    </p>
                   </div>
                 )}
               </div>

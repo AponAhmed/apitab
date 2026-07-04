@@ -7,33 +7,33 @@ type SubTab = 'pre' | 'post';
 
 const SNIPPETS: Record<SubTab, { label: string; code: string }[]> = {
   pre: [
-    { label: 'Set variable', code: 'pm.environment.set("key", "value");' },
-    { label: 'Timestamp', code: 'pm.environment.set("timestamp", Date.now());' },
-    { label: 'Random id', code: 'pm.environment.set("id", crypto.randomUUID());' },
+    { label: 'Set variable', code: 'apitab.environment.set("key", "value");' },
+    { label: 'Timestamp', code: 'apitab.environment.set("timestamp", Date.now());' },
+    { label: 'Random id', code: 'apitab.environment.set("id", crypto.randomUUID());' },
   ],
   post: [
     {
       label: 'Status is 200',
-      code: 'pm.test("Status is 200", () => {\n  pm.expect(pm.response.code).to.equal(200);\n});',
+      code: 'apitab.test("Status is 200", () => {\n  apitab.expect(apitab.response.code).to.equal(200);\n});',
     },
     {
       label: 'Save token',
-      code: 'const data = pm.response.json();\npm.environment.set("token", data.token);',
+      code: 'const data = apitab.response.json();\napitab.environment.set("token", data.token);',
     },
     {
       label: 'Has property',
-      code: 'pm.test("Body has id", () => {\n  pm.expect(pm.response.json()).to.have.property("id");\n});',
+      code: 'apitab.test("Body has id", () => {\n  apitab.expect(apitab.response.json()).to.have.property("id");\n});',
     },
     {
       label: 'Response time',
-      code: 'pm.test("Under 500ms", () => {\n  pm.expect(pm.response.responseTime).to.be.below(500);\n});',
+      code: 'apitab.test("Under 500ms", () => {\n  apitab.expect(apitab.response.responseTime).to.be.below(500);\n});',
     },
   ],
 };
 
 const PLACEHOLDER: Record<SubTab, string> = {
-  pre: '// Runs before the request is sent.\n// Use pm.environment.set(...) to prepare variables.',
-  post: '// Runs after the response arrives.\n// Use pm.test(...) and pm.expect(...) to write tests.',
+  pre: '// Runs before the request is sent.\n// Use apitab.environment.set(...) to prepare variables.',
+  post: '// Runs after the response arrives.\n// Use apitab.test(...) and apitab.expect(...) to write tests.',
 };
 
 export function ScriptsTab() {
@@ -95,8 +95,9 @@ export function ScriptsTab() {
           className="min-h-[180px] flex-1"
         />
         <p className="text-[11px] text-slate-400">
-          JavaScript with <code className="font-mono">pm</code> (environment, response, test, expect)
-          and <code className="font-mono">console</code>. Runs in a sandbox.
+          JavaScript with <code className="font-mono">apitab</code> (environment, response, test,
+          expect) and <code className="font-mono">console</code>. Runs in a sandbox.{' '}
+          <code className="font-mono">pm</code> also works, for pasted Postman scripts.
         </p>
       </div>
     </div>

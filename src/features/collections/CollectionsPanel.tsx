@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useCollectionStore } from '@/stores/collectionStore';
 import { useRequestStore } from '@/stores/requestStore';
+import { useEnvironmentStore } from '@/stores/environmentStore';
 import { useDialogStore } from '@/stores/dialogStore';
 import { toast } from '@/stores/toastStore';
 import { IconButton } from '@/components/ui/IconButton';
@@ -204,6 +205,12 @@ export function CollectionsPanel() {
   const activeRequestId = useRequestStore((s) => s.savedRef?.requestId ?? null);
   const openShareToTeam = useDialogStore((s) => s.openShareToTeam);
 
+  const environments = useEnvironmentStore((s) => s.environments);
+  const activeEnvId = useEnvironmentStore((s) => s.activeEnvironmentId);
+  const createEnvironment = useEnvironmentStore((s) => s.createEnvironment);
+  const setActiveEnvironment = useEnvironmentStore((s) => s.setActiveEnvironment);
+  const upsertVariable = useEnvironmentStore((s) => s.upsertVariable);
+
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [createOpen, setCreateOpen] = useState(false);
@@ -237,8 +244,16 @@ export function CollectionsPanel() {
     duplicate: (id) => duplicateContainer(id),
     removeContainer: (c) => setDeleteTarget({ id: c.id, name: c.name, kind: 'container' }),
     exportItem: (c) => {
-      downloadJson(`apitab-${sanitizeFilename(c.name)}.json`, exportContainer(c));
-      toast.success('Exported');
+      const activeEnv = environments.find((e) => e.id === activeEnvId);
+      const sharedVars = (activeEnv?.variables ?? [])
+        .filter((v) => v.shared && v.key.trim() !== '')
+        .map((v) => ({ key: v.key.trim(), value: v.value }));
+      downloadJson(`apitab-${sanitizeFilename(c.name)}.json`, exportContainer(c, sharedVars));
+      toast.success(
+        sharedVars.length
+          ? `Exported with ${sharedVars.length} shared variable${sharedVars.length === 1 ? '' : 's'}`
+          : 'Exported',
+      );
     },
     importInto: (containerId) => {
       importTarget.current = containerId;
@@ -258,7 +273,24 @@ export function CollectionsPanel() {
     const target = importTarget.current;
     if (target) importIntoContainer(target, parsed.data);
     else importAsCollection(parsed.data);
-    toast.success('Imported');
+
+    const sharedVars = parsed.data.environmentVariables;
+    if (sharedVars?.length) {
+      let envId = activeEnvId;
+      let envName = environments.find((e) => e.id === envId)?.name;
+      if (!envId) {
+        const created = createEnvironment('Imported');
+        envId = created.id;
+        envName = created.name;
+        setActiveEnvironment(envId);
+      }
+      for (const v of sharedVars) upsertVariable(envId, v.key, v.value);
+      toast.success(
+        `Imported with ${sharedVars.length} shared variable${sharedVars.length === 1 ? '' : 's'} into "${envName}"`,
+      );
+    } else {
+      toast.success('Imported');
+    }
   };
 
   return (

@@ -2,8 +2,10 @@ import type { ConsoleLog, ScriptContext, ScriptRun, TestResult } from '@/types';
 
 /*
  * Pure script-execution engine (no DOM). Runs user pre-request / post-response
- * scripts with a Postman-style `pm` API. Kept DOM-free so it can be unit-tested
- * and reused by the sandbox entrypoint.
+ * scripts against an `apitab` API modeled on Postman's `pm` (same shape:
+ * environment, response, test, expect) so pasted Postman scripts still work.
+ * `pm` remains available as an alias for that reason. Kept DOM-free so it can
+ * be unit-tested and reused by the sandbox entrypoint.
  */
 
 function fmt(v: unknown): string {
@@ -158,7 +160,7 @@ export function runUserScript(code: string, context: ScriptContext): ScriptRun {
     toObject: () => ({ ...env }),
   };
 
-  const pm = {
+  const apitab = {
     environment: store,
     variables: store,
     globals: store,
@@ -183,8 +185,10 @@ export function runUserScript(code: string, context: ScriptContext): ScriptRun {
   };
 
   try {
-    const fn = new Function('pm', 'console', 'apitab', `"use strict";\n${code}`);
-    fn(pm, sandboxConsole, pm);
+    // `pm` is kept as an alias of `apitab` so scripts written for Postman
+    // (or copy-pasted from there) keep working unchanged.
+    const fn = new Function('apitab', 'pm', 'console', `"use strict";\n${code}`);
+    fn(apitab, apitab, sandboxConsole);
   } catch (err) {
     return { tests, logs, envUpdates, error: (err as Error)?.message ?? String(err) };
   }

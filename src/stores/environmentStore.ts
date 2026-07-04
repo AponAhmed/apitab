@@ -27,6 +27,15 @@ function emptyVariable(): EnvVariable {
   return { id: uuid(), key: '', value: '', enabled: true };
 }
 
+/** Coerces possibly-corrupted (e.g. null from legacy/synced data) fields to safe strings. */
+function sanitizeVariable(v: EnvVariable): EnvVariable {
+  return { ...v, key: v.key ?? '', value: v.value ?? '', enabled: v.enabled ?? true };
+}
+
+function sanitizeEnvironment(env: Environment): Environment {
+  return { ...env, variables: (env.variables ?? []).map(sanitizeVariable) };
+}
+
 function touch(env: Environment): Environment {
   return { ...env, updatedAt: Date.now() };
 }
@@ -74,7 +83,7 @@ export const useEnvironmentStore = create<EnvironmentState>()(
           const copy: Environment = {
             id: uuid(),
             name: `${original.name} Copy`,
-            variables: original.variables.map((v) => ({ ...v, id: uuid() })),
+            variables: original.variables.map((v) => sanitizeVariable({ ...v, id: uuid() })),
             createdAt: now,
             updatedAt: now,
           };
@@ -97,7 +106,9 @@ export const useEnvironmentStore = create<EnvironmentState>()(
         set((s) => ({
           environments: s.environments.map((e) => {
             if (e.id !== envId) return e;
-            const variables = e.variables.map((v) => (v.id === varId ? { ...v, ...patch } : v));
+            const variables = e.variables
+              .map((v) => (v.id === varId ? { ...v, ...patch } : v))
+              .map(sanitizeVariable);
             // Keep a trailing empty row available for quick entry.
             const last = variables[variables.length - 1];
             if (!last || last.key.trim() !== '' || last.value.trim() !== '') {
@@ -121,8 +132,8 @@ export const useEnvironmentStore = create<EnvironmentState>()(
           environments: s.environments.map((e) => {
             if (e.id !== envId) return e;
             const trimmed = key.trim();
-            const idx = e.variables.findIndex((v) => v.key.trim() === trimmed);
-            const variables = [...e.variables];
+            const variables = e.variables.map(sanitizeVariable);
+            const idx = variables.findIndex((v) => v.key.trim() === trimmed);
             if (idx >= 0) {
               variables[idx] = { ...variables[idx], value, enabled: true };
             } else {
@@ -144,18 +155,18 @@ export const useEnvironmentStore = create<EnvironmentState>()(
         const env = environments.find((e) => e.id === activeEnvironmentId);
         if (!env) return {};
         const map: VariableMap = {};
-        for (const v of env.variables) {
+        for (const v of env.variables.map(sanitizeVariable)) {
           if (v.enabled && v.key.trim() !== '') map[v.key.trim()] = v.value;
         }
         return map;
       },
 
-      replaceAll: (environments) => set({ environments }),
+      replaceAll: (environments) => set({ environments: environments.map(sanitizeEnvironment) }),
 
       mergeImported: (incoming) =>
         set((s) => {
           const byId = new Map(s.environments.map((e) => [e.id, e]));
-          for (const e of incoming) byId.set(e.id, e);
+          for (const e of incoming) byId.set(e.id, sanitizeEnvironment(e));
           return { environments: [...byId.values()] };
         }),
     }),
@@ -166,6 +177,16 @@ export const useEnvironmentStore = create<EnvironmentState>()(
         environments,
         activeEnvironmentId,
       }),
+      // Sanitize on rehydration so already-persisted corrupted data (e.g. a
+      // null key from a historical bug) can't crash the app on next launch.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as { environments?: Environment[]; activeEnvironmentId?: string | null };
+        return {
+          ...current,
+          environments: (p.environments ?? []).map(sanitizeEnvironment),
+          activeEnvironmentId: p.activeEnvironmentId ?? current.activeEnvironmentId,
+        };
+      },
     },
   ),
 );
