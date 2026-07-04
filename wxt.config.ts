@@ -39,5 +39,17 @@ export default defineConfig({
   },
   vite: () => ({
     plugins: [tailwindcss()],
+    server: {
+      // The sandbox page (src/entrypoints/sandbox) runs with an opaque
+      // (`null`) origin, per its manifest `sandbox` CSP — required so it can
+      // `new Function(...)` user pre-request/post-response scripts, which
+      // regular extension pages forbid. In dev mode its module scripts are
+      // served live from this Vite server for HMR; without permissive CORS,
+      // the browser blocks those fetches (opaque origin can't satisfy same-
+      // origin), the sandbox's own code never runs, and every script times
+      // out with "Script sandbox was reset." Production builds are
+      // self-contained and unaffected.
+      cors: true,
+    },
   }),
 });

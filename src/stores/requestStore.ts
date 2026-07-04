@@ -53,11 +53,35 @@ function applyEnvUpdates(
   return next;
 }
 
+/** Coerces possibly-corrupted (e.g. null from legacy/synced data) fields to safe strings. */
+function sanitizeKeyValue(kv: KeyValue): KeyValue {
+  return { ...kv, key: kv.key ?? '', value: kv.value ?? '', enabled: kv.enabled ?? true };
+}
+
 /** Ensures a key/value list always ends with one blank row for quick entry. */
 function withTrailingRow(rows: KeyValue[]): KeyValue[] {
-  const last = rows[rows.length - 1];
-  if (!last || last.key !== '' || last.value !== '') return [...rows, emptyKeyValue()];
-  return rows;
+  const sanitized = rows.map(sanitizeKeyValue);
+  const last = sanitized[sanitized.length - 1];
+  if (!last || last.key !== '' || last.value !== '') return [...sanitized, emptyKeyValue()];
+  return sanitized;
+}
+
+/** Snapshot of a request's last outcome, cached so switching between saved
+ * requests shows each one's own last response instead of a blank panel. */
+interface CachedResponse {
+  response: ApiResponse | null;
+  error: ApiError | null;
+  scriptRun: ScriptRunResult | null;
+  sentAt: number | null;
+}
+
+/**
+ * The stable identity to cache a response under: the saved-request id when
+ * this request has been saved (so reopening it from a collection finds its
+ * last response), otherwise the draft's own (transient) id.
+ */
+function responseCacheKey(request: ApiRequest, savedRef: SavedRequestRef | null): string {
+  return savedRef?.requestId ?? request.id;
 }
 
 /** Backfills defaults + trailing rows so any request is safe to edit/render. */
@@ -98,6 +122,8 @@ interface RequestState {
   scriptRun: ScriptRunResult | null;
   activeRequestTab: RequestTab;
   activeResponseTab: ResponseTab;
+  /** Last response/error/scriptRun per request id — see {@link responseCacheKey}. */
+  responseCache: Record<string, CachedResponse>;
 
   // URL / method / name
   setMethod: (method: HttpMethod) => void;
@@ -161,6 +187,7 @@ export const useRequestStore = create<RequestState>()(
         scriptRun: null,
         activeRequestTab: 'params',
         activeResponseTab: 'body',
+        responseCache: {},
 
         setMethod: (method) => patch((r) => ({ ...r, method })),
 
@@ -319,13 +346,25 @@ export const useRequestStore = create<RequestState>()(
               scriptRun.pre?.error ||
                 scriptRun.post?.error ||
                 scriptRun.pre?.tests.length ||
-                scriptRun.post?.tests.length,
+                scriptRun.post?.tests.length ||
+                scriptRun.pre?.logs.length ||
+                scriptRun.post?.logs.length,
             );
-            set({
+            const finalScriptRun = hasScriptOutput ? scriptRun : null;
+            set((s) => ({
               isLoading: false,
-              scriptRun: hasScriptOutput ? scriptRun : null,
-              activeResponseTab: showTests ? 'tests' : result.ok ? 'body' : get().activeResponseTab,
-            });
+              scriptRun: finalScriptRun,
+              activeResponseTab: showTests ? 'tests' : result.ok ? 'body' : s.activeResponseTab,
+              responseCache: {
+                ...s.responseCache,
+                [responseCacheKey(request, s.savedRef)]: {
+                  response: result.ok ? result.response : null,
+                  error: result.ok ? null : result.error,
+                  scriptRun: finalScriptRun,
+                  sentAt: Date.now(),
+                },
+              },
+            }));
 
             useHistoryStore.getState().addEntry(
               {
@@ -339,13 +378,24 @@ export const useRequestStore = create<RequestState>()(
               useSettingsStore.getState().historyLimit,
             );
           } catch (err) {
-            set({
+            const caughtError: ApiError = { type: 'unknown', message: (err as Error).message };
+            const caughtScriptRun = scriptRun.pre || scriptRun.post ? scriptRun : null;
+            set((s) => ({
               response: null,
-              error: { type: 'unknown', message: (err as Error).message },
+              error: caughtError,
               isLoading: false,
-              scriptRun: scriptRun.pre || scriptRun.post ? scriptRun : null,
+              scriptRun: caughtScriptRun,
               sentAt: Date.now(),
-            });
+              responseCache: {
+                ...s.responseCache,
+                [responseCacheKey(request, s.savedRef)]: {
+                  response: null,
+                  error: caughtError,
+                  scriptRun: caughtScriptRun,
+                  sentAt: Date.now(),
+                },
+              },
+            }));
           }
         },
 
@@ -361,14 +411,17 @@ export const useRequestStore = create<RequestState>()(
           }),
 
         loadRequest: (req, savedRef = null) =>
-          set({
-            request: normalizeForEditing(structuredClone(req)),
-            savedRef,
-            response: null,
-            error: null,
-            isLoading: false,
-            sentAt: null,
-            scriptRun: null,
+          set((s) => {
+            const cached = s.responseCache[responseCacheKey(req, savedRef)];
+            return {
+              request: normalizeForEditing(structuredClone(req)),
+              savedRef,
+              response: cached?.response ?? null,
+              error: cached?.error ?? null,
+              isLoading: false,
+              sentAt: cached?.sentAt ?? null,
+              scriptRun: cached?.scriptRun ?? null,
+            };
           }),
 
         importCurl: (text) => {
@@ -382,10 +435,19 @@ export const useRequestStore = create<RequestState>()(
             .getState()
             .addRequest(containerId, get().request, name);
           if (saved) {
-            set((s) => ({
-              savedRef: { containerId, requestId: saved.id },
-              request: { ...s.request, name: saved.name },
-            }));
+            set((s) => {
+              // Carry the draft's cached response over to the new saved id,
+              // so it's still there next time this saved request is opened.
+              const oldKey = responseCacheKey(s.request, s.savedRef);
+              const cached = s.responseCache[oldKey];
+              return {
+                savedRef: { containerId, requestId: saved.id },
+                request: { ...s.request, name: saved.name },
+                responseCache: cached
+                  ? { ...s.responseCache, [saved.id]: cached }
+                  : s.responseCache,
+              };
+            });
           }
           return saved;
         },
@@ -406,6 +468,7 @@ export const useRequestStore = create<RequestState>()(
         savedRef: s.savedRef,
         activeRequestTab: s.activeRequestTab,
         activeResponseTab: s.activeResponseTab,
+        responseCache: s.responseCache,
       }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<RequestState>;
@@ -413,6 +476,7 @@ export const useRequestStore = create<RequestState>()(
           ...current,
           ...p,
           request: p.request ? normalizeForEditing(p.request) : current.request,
+          responseCache: p.responseCache ?? {},
         };
       },
     },

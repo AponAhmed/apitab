@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '@/config/server';
+import { API_BASE_URL, API_KEY } from '@/config/server';
 import { useAccountStore } from '@/stores/accountStore';
 import type { AuthSession, Collection, SyncResponse, Team, TeamMember } from '@/types';
 
@@ -32,6 +32,7 @@ async function request<T>(
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
+    'X-Api-Key': API_KEY,
   };
   if (auth) {
     const token = useAccountStore.getState().session?.token;
@@ -76,6 +77,24 @@ export const apiClient = {
 
   logout: () => request<{ message: string }>('POST', '/logout'),
 
+  forgotPassword: (email: string) =>
+    request<{ message: string }>('POST', '/forgot-password', { email }, false),
+
+  resetPassword: (email: string, token: string, password: string, passwordConfirmation: string) =>
+    request<{ message: string }>(
+      'POST',
+      '/reset-password',
+      { email, token, password, password_confirmation: passwordConfirmation },
+      false,
+    ),
+
+  changePassword: (currentPassword: string, password: string, passwordConfirmation: string) =>
+    request<{ message: string }>('POST', '/change-password', {
+      current_password: currentPassword,
+      password,
+      password_confirmation: passwordConfirmation,
+    }),
+
   me: () => request<{ user: AuthSession['user']; teams: Pick<Team, 'id' | 'name' | 'role'>[] }>('GET', '/me'),
 
   fetchTeams: () => request<{ teams: Team[] }>('GET', '/teams'),
@@ -114,4 +133,7 @@ export const apiClient = {
 
   fetchSync: (teamId: string, since: number) =>
     request<SyncResponse>('GET', `/teams/${teamId}/sync?since=${since}`),
+
+  addTeamMember: (teamId: string, email: string, role: string) =>
+    request<TeamMember>('POST', `/teams/${teamId}/members`, { email, role }),
 };
