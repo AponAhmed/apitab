@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
-  manifest: {
+  manifest: ({ browser }) => ({
     name: 'ApiTab',
     description:
       'Lightweight, local-first API testing tool — a fast, minimal alternative to Postman.',
@@ -28,11 +28,31 @@ export default defineConfig({
     // Sandbox page runs user pre-request/post-response scripts (needs eval,
     // which extension pages forbid).
     sandbox: { pages: ['sandbox.html'] },
-    content_security_policy: {
-      sandbox:
-        "sandbox allow-scripts allow-forms; script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'self';",
+    // Firefox has no equivalent of Chrome's sandboxed-page origin isolation —
+    // the `sandbox` manifest key/CSP is a no-op there, so sandbox.html just
+    // loads as a regular extension page under the `extension_pages` CSP.
+    // Chrome MV3 forbids 'unsafe-eval' in `extension_pages` entirely, so eval
+    // there is confined to the isolated sandbox origin instead.
+    content_security_policy:
+      browser === 'firefox'
+        ? { extension_pages: "script-src 'self' 'unsafe-eval'; object-src 'self';" }
+        : {
+            sandbox:
+              "sandbox allow-scripts allow-forms; script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'self';",
+          },
+    browser_specific_settings: {
+      gecko: {
+        id: '{94f73efd-e2be-4067-b2e9-be05268189d1}',
+        // Core extension collects nothing; the optional team-sync feature
+        // sends account name/email and password to our own backend only
+        // when a user opts in by signing in.
+        data_collection_permissions: {
+          required: ['none'],
+          optional: ['personallyIdentifyingInfo', 'authenticationInfo'],
+        },
+      },
     },
-  },
+  }),
   // Allow headless dev (no auto-launched browser) via WXT_HEADLESS=1.
   webExt: {
     disabled: process.env.WXT_HEADLESS === '1',
