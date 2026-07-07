@@ -4,6 +4,7 @@ import { useTeamStore } from '@/stores/teamStore';
 import { useCollectionStore } from '@/stores/collectionStore';
 import { useEnvironmentStore } from '@/stores/environmentStore';
 import { useTeamVariablesStore } from '@/stores/teamVariablesStore';
+import { usePendingAssignmentsStore } from '@/stores/pendingAssignmentsStore';
 import { toast } from '@/stores/toastStore';
 import type { Collection, Environment, TeamVariable } from '@/types';
 
@@ -87,7 +88,19 @@ function onCollectionsChanged(
     if (prev.teamId && !currentIds.has(prev.id)) {
       const role = roleForTeam(prev.teamId);
       pushedVersions.delete(prev.id);
-      if (role === 'member') continue; // local-only delete, never propagated
+      if (role === 'member') {
+        // A plain member can't persist a real delete (the server would
+        // 403 an owner/admin-only destroy), so this instead declines their
+        // own assignment — the fix for deleted shared collections
+        // reappearing after re-login: previously this was a silent no-op,
+        // meaning the server never learned about the removal at all and
+        // the very next sync pull re-added its still-existing server copy.
+        void apiClient.leaveTeamCollection(prev.teamId, prev.id).catch(() => {
+          // Best-effort: if this fails, their assignment is still
+          // 'accepted' server-side, so it may reappear on next pull, which is safe.
+        });
+        continue;
+      }
       void apiClient.deleteRemoteCollection(prev.teamId, prev.id).catch(() => {
         // Best-effort: if this fails the item may reappear on next pull, which is safe.
       });
@@ -253,18 +266,24 @@ export function initSyncService(): void {
   });
 }
 
-/** Shares a local (untagged) collection with a team: creates it remotely. */
-export async function shareCollectionToTeam(collectionId: string, teamId: string): Promise<void> {
+/** Shares a local (untagged) collection with a team: creates it remotely, optionally assigning it to specific member(s) right away. */
+export async function shareCollectionToTeam(
+  collectionId: string,
+  teamId: string,
+  userIds: string[] = [],
+): Promise<void> {
   const collection = useCollectionStore.getState().collections.find((c) => c.id === collectionId);
   if (!collection) throw new Error('Collection not found');
 
-  const created = await apiClient.createRemoteCollection(teamId, collection);
+  const created = await apiClient.createRemoteCollection(teamId, collection, userIds);
   pushedVersions.set(collectionId, created.updatedAt);
   applyingRemote = true;
   try {
     useCollectionStore.setState((s) => ({
       collections: s.collections.map((c) =>
-        c.id === collectionId ? { ...c, teamId, updatedAt: created.updatedAt } : c,
+        c.id === collectionId
+          ? { ...c, teamId, updatedAt: created.updatedAt, createdBy: created.createdBy }
+          : c,
       ),
     }));
   } finally {
@@ -326,5 +345,12 @@ export async function runAllTeamsSync(): Promise<void> {
 
   for (const team of useTeamStore.getState().teams) {
     await runSyncTick(team.id);
+  }
+
+  try {
+    const { assignments } = await apiClient.fetchPendingAssignments();
+    usePendingAssignmentsStore.getState().setAll(assignments);
+  } catch {
+    // Offline/transient — keep showing the last known list.
   }
 }
