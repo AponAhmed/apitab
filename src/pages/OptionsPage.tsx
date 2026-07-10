@@ -9,7 +9,7 @@ import { useAccountStore } from '@/stores/accountStore';
 import { useTeamStore } from '@/stores/teamStore';
 import { useDialogStore } from '@/stores/dialogStore';
 import { apiClient } from '@/services/apiClient';
-import { runAllTeamsSync } from '@/services/syncService';
+import { clearTeamCollectionsOnLogout, runAllTeamsSync } from '@/services/syncService';
 import { toast } from '@/stores/toastStore';
 import { Toaster } from '@/components/Toaster';
 import { Button } from '@/components/ui/Button';
@@ -79,6 +79,7 @@ export function OptionsPage() {
     }
     clearSession();
     resetTeams();
+    clearTeamCollectionsOnLogout();
     toast.info('Logged out');
   };
 
