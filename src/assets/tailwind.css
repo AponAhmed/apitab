@@ -79,3 +79,16 @@
     background: transparent;
   }
 }
+
+@layer utilities {
+  /* Hides the native scrollbar while keeping the element scrollable (wheel,
+     drag, arrow-button driven). Used by strips like RecentRequestsBar that
+     want a "modern" chip-scroller feel instead of a visible track. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}

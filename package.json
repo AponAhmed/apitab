@@ -2,7 +2,7 @@
   "name": "apitab",
   "displayName": "ApiTab",
   "description": "Lightweight, local-first API testing browser extension — a fast, minimal alternative to Postman.",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "type": "module",
   "private": true,
   "scripts": {

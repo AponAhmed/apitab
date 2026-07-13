@@ -86,7 +86,7 @@ function syncPathVariables(url: string, existing: KeyValue[]): KeyValue[] {
 
 /** Snapshot of a request's last outcome, cached so switching between saved
  * requests shows each one's own last response instead of a blank panel. */
-interface CachedResponse {
+export interface CachedResponse {
   response: ApiResponse | null;
   error: ApiError | null;
   scriptRun: ScriptRunResult | null;
@@ -203,7 +203,11 @@ interface RequestState {
   // Lifecycle
   send: () => Promise<void>;
   newRequest: () => void;
-  loadRequest: (req: ApiRequest, savedRef?: SavedRequestRef | null) => void;
+  loadRequest: (
+    req: ApiRequest,
+    savedRef?: SavedRequestRef | null,
+    snapshot?: CachedResponse | null,
+  ) => void;
   importCurl: (text: string) => ParseCurlResult;
   saveToCollection: (collectionId: string, name: string) => ApiRequest | null;
   updateSaved: () => boolean;
@@ -423,6 +427,9 @@ export const useRequestStore = create<RequestState>()(
                 timestamp: Date.now(),
                 status: result.ok ? result.response.status : undefined,
                 request: structuredClone(request),
+                response: result.ok ? result.response : null,
+                error: result.ok ? null : result.error,
+                scriptRun: finalScriptRun,
               },
               useSettingsStore.getState().historyLimit,
             );
@@ -459,9 +466,9 @@ export const useRequestStore = create<RequestState>()(
             scriptRun: null,
           }),
 
-        loadRequest: (req, savedRef = null) =>
+        loadRequest: (req, savedRef = null, snapshot) =>
           set((s) => {
-            const cached = s.responseCache[responseCacheKey(req, savedRef)];
+            const cached = snapshot !== undefined ? snapshot : s.responseCache[responseCacheKey(req, savedRef)];
             return {
               request: normalizeForEditing(structuredClone(req)),
               savedRef,
