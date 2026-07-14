@@ -24,7 +24,7 @@ export default defineBackground(() => {
   initSyncService();
 
   // Scheduled polling pull — survives service worker suspension, unlike setInterval.
-  browser.alarms.create(SYNC_ALARM, { periodInMinutes: 10 });
+  browser.alarms.create(SYNC_ALARM, { periodInMinutes: 5 });
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === SYNC_ALARM) void runAllTeamsSync();
   });
