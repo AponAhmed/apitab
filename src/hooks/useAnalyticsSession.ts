@@ -14,12 +14,19 @@ const HEARTBEAT_MS = 120_000;
  */
 export function useAnalyticsSession() {
   const sessionIdRef = useRef<string>(uuid());
+  // The local calendar day sessionIdRef's session was started on — checked
+  // on every heartbeat so a tab left open for a long time (or the app
+  // window, on desktop) gets a fresh session the moment the day rolls
+  // over. Without this, a single page load's session stays attached to
+  // whichever day it originally started, and every day of continued use
+  // after that is invisible to the daily usage chart no matter how much
+  // the extension is actually used that day.
+  const dayRef = useRef<string>(new Date().toDateString());
 
   useEffect(() => {
-    const sessionId = sessionIdRef.current;
     let cancelled = false;
 
-    void (async () => {
+    const startSession = async () => {
       // On a fresh page/context load (a new app.html tab, popup, or the
       // background worker waking), accountStore's own automatic hydration
       // from browser.storage.local may not have finished yet — without
@@ -33,17 +40,26 @@ export function useAnalyticsSession() {
       const [platform, appVersion] = await Promise.all([getPlatform(), getAppVersion()]);
       if (cancelled) return;
       try {
-        await apiClient.startAnalyticsSession(sessionId, platform, appVersion);
+        await apiClient.startAnalyticsSession(sessionIdRef.current, platform, appVersion);
       } catch {
         // best-effort
       }
-    })();
+    };
+
+    void startSession();
 
     // Only counts while the page is actually visible, so a tab left open
     // and forgotten in the background doesn't inflate "time used."
     const heartbeat = () => {
       if (document.visibilityState !== 'visible') return;
-      apiClient.heartbeatAnalyticsSession(sessionId).catch(() => {});
+      const today = new Date().toDateString();
+      if (today !== dayRef.current) {
+        dayRef.current = today;
+        sessionIdRef.current = uuid();
+        void startSession();
+        return;
+      }
+      apiClient.heartbeatAnalyticsSession(sessionIdRef.current).catch(() => {});
     };
     const interval = setInterval(heartbeat, HEARTBEAT_MS);
 
@@ -51,7 +67,7 @@ export function useAnalyticsSession() {
     // completes, but the heartbeat above already carries the real duration
     // up to the last visible tick, so a missed end call is harmless.
     const onUnload = () => {
-      apiClient.endAnalyticsSession(sessionId).catch(() => {});
+      apiClient.endAnalyticsSession(sessionIdRef.current).catch(() => {});
     };
     window.addEventListener('beforeunload', onUnload);
     window.addEventListener('pagehide', onUnload);
