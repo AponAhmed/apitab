@@ -331,8 +331,14 @@ export async function unshareCollection(collectionId: string, teamId: string): P
   }
 }
 
-export async function runSyncTick(teamId: string): Promise<void> {
-  useTeamStore.getState().setSyncing(true);
+/**
+ * `silent` skips the `isSyncing` flag that drives the toolbar's spinning
+ * icon — for a periodic background poll, spinning on every tick reads as
+ * constant activity even though nothing visibly changed; the icon should
+ * only animate for a sync the user actually asked for (manual click).
+ */
+export async function runSyncTick(teamId: string, opts?: { silent?: boolean }): Promise<void> {
+  if (!opts?.silent) useTeamStore.getState().setSyncing(true);
   try {
     const since = useTeamStore.getState().lastSyncedAt[teamId] ?? 0;
     const res = await apiClient.fetchSync(teamId, since);
@@ -356,7 +362,7 @@ export async function runSyncTick(teamId: string): Promise<void> {
   } catch (err) {
     useTeamStore.getState().setSyncError(err instanceof Error ? err.message : 'Sync failed');
   } finally {
-    useTeamStore.getState().setSyncing(false);
+    if (!opts?.silent) useTeamStore.getState().setSyncing(false);
   }
 }
 
@@ -370,7 +376,7 @@ export async function runSyncTick(teamId: string): Promise<void> {
  * still-in-flight or stale on-disk copy (session reverts to null, or teams
  * to []), aborting the sync below with no error and an empty workspace.
  */
-export async function runAllTeamsSync(opts?: { skipRehydrate?: boolean }): Promise<void> {
+export async function runAllTeamsSync(opts?: { skipRehydrate?: boolean; silent?: boolean }): Promise<void> {
   if (!opts?.skipRehydrate) {
     // On a freshly woken service worker, persisted state may not have finished
     // hydrating from browser.storage.local yet — make sure it has before
@@ -405,7 +411,7 @@ export async function runAllTeamsSync(opts?: { skipRehydrate?: boolean }): Promi
   }
 
   for (const team of useTeamStore.getState().teams) {
-    await runSyncTick(team.id);
+    await runSyncTick(team.id, { silent: opts?.silent });
   }
 
   try {
