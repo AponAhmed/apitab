@@ -36,6 +36,23 @@ interface CollectionState {
   importIntoContainer: (containerId: string, data: CollectionExport) => void;
   replaceAll: (collections: Collection[]) => void;
   mergeImported: (collections: Collection[]) => void;
+  /** Tags a local (untagged) collection as shared with a team. */
+  setCollectionTeam: (collectionId: string, teamId: string) => void;
+  /**
+   * Upserts collections pulled from a team's /sync response and removes any
+   * team-tagged collection whose id is in `deletedIds`. Distinct from
+   * mergeImported: this understands remote deletions, which plain
+   * upsert-by-id cannot represent.
+   */
+  mergeSync: (teamId: string, incoming: Collection[], deletedIds: string[]) => void;
+  /**
+   * Drops every team-tagged collection (they'll re-arrive via /sync on next
+   * login) while preserving local, untagged ones. Call on logout — without
+   * this, a different account logging in on the same device would still see
+   * the previous account's team collections until the next sync overwrites
+   * them, and could briefly act on stale/foreign data in the meantime.
+   */
+  clearTeamCollections: () => void;
 }
 
 function bump(collections: Collection[], id: string) {
@@ -198,6 +215,27 @@ export const useCollectionStore = create<CollectionState>()(
           for (const c of incoming) byId.set(c.id, normalizeContainer(c));
           return { collections: [...byId.values()] };
         }),
+
+      setCollectionTeam: (collectionId, teamId) =>
+        set((s) => ({
+          collections: s.collections.map((c) =>
+            c.id === collectionId ? { ...c, teamId, updatedAt: Date.now() } : c,
+          ),
+        })),
+
+      mergeSync: (teamId, incoming, deletedIds) =>
+        set((s) => {
+          const byId = new Map(s.collections.map((c) => [c.id, c]));
+          for (const c of incoming) byId.set(c.id, normalizeContainer({ ...c, teamId }));
+          for (const id of deletedIds) {
+            const existing = byId.get(id);
+            if (existing && existing.teamId === teamId) byId.delete(id);
+          }
+          return { collections: [...byId.values()] };
+        }),
+
+      clearTeamCollections: () =>
+        set((s) => ({ collections: s.collections.filter((c) => !c.teamId) })),
     }),
     {
       name: 'apitab:collections',

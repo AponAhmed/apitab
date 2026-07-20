@@ -1,45 +1,90 @@
 import { useState } from 'react';
-import { Info, PanelLeft, Settings } from 'lucide-react';
+import { Info, Monitor, Moon, PanelLeft, Settings, Sun } from 'lucide-react';
 import { useUiStore } from '@/stores/uiStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { IconButton } from '@/components/ui/IconButton';
-import { ThemeToggle } from '@/components/ThemeToggle';
 import { Logo } from '@/components/Logo';
 import { AboutDialog } from '@/components/AboutDialog';
 import { EnvironmentSelector } from '@/features/environments/EnvironmentSelector';
+import { TeamSelector, SyncButton, AccountAvatar } from '@/features/account/AccountMenu';
+import { LoginDialog } from '@/features/account/LoginDialog';
+import { PendingAssignmentsBell } from '@/components/PendingAssignmentsBell';
+
+/** Shared "clustered & bordered" pill styling for the context/utility control groups. */
+const CLUSTER =
+  'flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 px-1 py-0.5 dark:border-slate-800 dark:bg-white/[0.04]';
+
+const THEME_ICONS = { light: Sun, dark: Moon, system: Monitor } as const;
+const THEME_ORDER = ['light', 'dark', 'system'] as const;
+
+function ThemeToggle() {
+  const theme = useSettingsStore((s) => s.theme);
+  const Icon = THEME_ICONS[theme];
+  return (
+    <IconButton
+      size="sm"
+      title={`Theme: ${theme} (click to change)`}
+      aria-label={`Theme: ${theme}`}
+      onClick={() => {
+        const next = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
+        useSettingsStore.getState().setTheme(next);
+      }}
+    >
+      <Icon className="h-4 w-4" />
+    </IconButton>
+  );
+}
 
 export function TopBar() {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const [aboutOpen, setAboutOpen] = useState(false);
 
   return (
-    <header className="flex h-10 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-2.5 dark:border-slate-800 dark:bg-slate-900">
-      <IconButton title="Toggle sidebar" aria-label="Toggle sidebar" onClick={toggleSidebar}>
+    <header className="flex h-11 shrink-0 items-center gap-1.5 border-b border-slate-200 bg-white px-2.5 dark:border-slate-800 dark:bg-[#0f111a]">
+      <IconButton size="sm" title="Toggle sidebar" aria-label="Toggle sidebar" onClick={toggleSidebar}>
         <PanelLeft className="h-4 w-4" />
       </IconButton>
 
-      <div className="flex items-center gap-2">
-        <Logo className="h-6 w-6" />
-        <span className="text-sm font-semibold tracking-tight text-slate-800 dark:text-slate-100">
+      <div className="flex items-center gap-1.5 text-brand-500">
+        <Logo className="h-5 w-5" />
+        <span className="text-sm font-semibold tracking-wide text-slate-900 dark:text-slate-100">
           ApiTab
         </span>
       </div>
 
       <div className="flex-1" />
 
-      <EnvironmentSelector />
-      <ThemeToggle />
-      <IconButton title="About" aria-label="About ApiTab" onClick={() => setAboutOpen(true)}>
-        <Info className="h-4 w-4" />
-      </IconButton>
-      <IconButton
-        title="Settings"
-        aria-label="Open settings"
-        onClick={() => browser.runtime.openOptionsPage()}
-      >
-        <Settings className="h-4 w-4" />
-      </IconButton>
+      <div className="mr-1.5 flex items-center gap-1.5">
+        {/* Context: what you're working in. */}
+        <div className={CLUSTER}>
+          <EnvironmentSelector />
+          <div className="mx-0.5 h-4 w-px bg-slate-200 dark:bg-slate-700" />
+          <TeamSelector />
+        </div>
+
+        {/* Utilities: sync, notifications, app-level actions. */}
+        <div className={CLUSTER}>
+          <SyncButton />
+          <PendingAssignmentsBell />
+          <ThemeToggle />
+          <IconButton size="sm" title="About" aria-label="About ApiTab" onClick={() => setAboutOpen(true)}>
+            <Info className="h-4 w-4" />
+          </IconButton>
+          <IconButton
+            size="sm"
+            title="Settings"
+            aria-label="Open settings"
+            onClick={() => browser.runtime.openOptionsPage()}
+          >
+            <Settings className="h-4 w-4" />
+          </IconButton>
+        </div>
+      </div>
+
+      <AccountAvatar />
 
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <LoginDialog />
     </header>
   );
 }
