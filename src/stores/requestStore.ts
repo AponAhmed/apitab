@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { createRequest, emptyKeyValue } from '@/utils/defaults';
 import { formatJson } from '@/utils/json';
-import { paramsFromUrl, urlWithParams } from '@/utils/query';
+import { paramsFromUrl, pathVariableNamesFromUrl, urlWithParams } from '@/utils/query';
 import { uuid } from '@/utils/id';
 import { executeRequest, prepareRequest } from '@/services/requestService';
 import { runScript } from '@/services/scriptRunner';
@@ -53,11 +53,53 @@ function applyEnvUpdates(
   return next;
 }
 
+/** Coerces possibly-corrupted (e.g. null from legacy/synced data) fields to safe strings. */
+function sanitizeKeyValue(kv: KeyValue): KeyValue {
+  return {
+    ...kv,
+    key: kv.key ?? '',
+    value: kv.value ?? '',
+    enabled: kv.enabled ?? true,
+    description: kv.description ?? '',
+  };
+}
+
 /** Ensures a key/value list always ends with one blank row for quick entry. */
 function withTrailingRow(rows: KeyValue[]): KeyValue[] {
-  const last = rows[rows.length - 1];
-  if (!last || last.key !== '' || last.value !== '') return [...rows, emptyKeyValue()];
-  return rows;
+  const sanitized = rows.map(sanitizeKeyValue);
+  const last = sanitized[sanitized.length - 1];
+  if (!last || last.key !== '' || last.value !== '') return [...sanitized, emptyKeyValue()];
+  return sanitized;
+}
+
+/**
+ * Derives path-variable rows from `:name` segments in the URL, preserving
+ * each existing row's value/enabled state for names that still appear (and
+ * dropping/adding rows as the URL text changes) — there's no manual
+ * add/remove for these, unlike params/headers.
+ */
+function syncPathVariables(url: string, existing: KeyValue[]): KeyValue[] {
+  const names = pathVariableNamesFromUrl(url);
+  const byName = new Map(existing.map(sanitizeKeyValue).map((kv) => [kv.key, kv]));
+  return names.map((name) => byName.get(name) ?? emptyKeyValue({ key: name }));
+}
+
+/** Snapshot of a request's last outcome, cached so switching between saved
+ * requests shows each one's own last response instead of a blank panel. */
+export interface CachedResponse {
+  response: ApiResponse | null;
+  error: ApiError | null;
+  scriptRun: ScriptRunResult | null;
+  sentAt: number | null;
+}
+
+/**
+ * The stable identity to cache a response under: the saved-request id when
+ * this request has been saved (so reopening it from a collection finds its
+ * last response), otherwise the draft's own (transient) id.
+ */
+function responseCacheKey(request: ApiRequest, savedRef: SavedRequestRef | null): string {
+  return savedRef?.requestId ?? request.id;
 }
 
 /** Backfills defaults + trailing rows so any request is safe to edit/render. */
@@ -68,13 +110,29 @@ function normalizeForEditing(req: ApiRequest): ApiRequest {
     ...req,
     auth: {
       type: req.auth?.type ?? 'none',
-      bearer: { ...base.auth.bearer, ...req.auth?.bearer },
-      basic: { ...base.auth.basic, ...req.auth?.basic },
-      apiKey: { ...base.auth.apiKey, ...req.auth?.apiKey },
+      // Field-by-field (not a spread merge) so an explicit `null` surviving
+      // from a corrupted/imported request is coerced back to a safe string
+      // instead of overriding the default and crashing VariableInput/Input.
+      bearer: { token: req.auth?.bearer?.token ?? '' },
+      basic: {
+        username: req.auth?.basic?.username ?? '',
+        password: req.auth?.basic?.password ?? '',
+      },
+      apiKey: {
+        key: req.auth?.apiKey?.key ?? '',
+        value: req.auth?.apiKey?.value ?? '',
+        addTo: req.auth?.apiKey?.addTo ?? 'header',
+      },
     },
     body: {
       ...base.body,
       ...req.body,
+      // Explicit fallbacks (not just the spread above) so an explicit
+      // `null` surviving from corrupted/imported/synced data is coerced
+      // back to a safe string instead of overriding the default and
+      // crashing JsonBody/RawBody, which call `.trim()` unconditionally.
+      json: req.body?.json ?? '',
+      raw: req.body?.raw ?? '',
       formUrlEncoded: withTrailingRow(req.body?.formUrlEncoded ?? []),
       formData: withTrailingRow(req.body?.formData ?? []),
     },
@@ -83,6 +141,7 @@ function normalizeForEditing(req: ApiRequest): ApiRequest {
       postResponse: req.scripts?.postResponse ?? '',
     },
     params: withTrailingRow(req.params ?? []),
+    pathVariables: syncPathVariables(req.url ?? '', req.pathVariables ?? []),
     headers: withTrailingRow(req.headers ?? []),
   };
   return merged;
@@ -95,9 +154,13 @@ interface RequestState {
   isLoading: boolean;
   sentAt: number | null;
   savedRef: SavedRequestRef | null;
+  /** True once a saved request (savedRef !== null) has edits not yet persisted — drives the auto-save debounce and the unsaved-changes dot. Meaningless for a scratch draft (savedRef === null), which only saves on an explicit action. */
+  isDirty: boolean;
   scriptRun: ScriptRunResult | null;
   activeRequestTab: RequestTab;
   activeResponseTab: ResponseTab;
+  /** Last response/error/scriptRun per request id — see {@link responseCacheKey}. */
+  responseCache: Record<string, CachedResponse>;
 
   // URL / method / name
   setMethod: (method: HttpMethod) => void;
@@ -107,6 +170,9 @@ interface RequestState {
   // Query params (kept in sync with the URL)
   updateParam: (id: string, patch: Partial<KeyValue>) => void;
   removeParam: (id: string) => void;
+
+  // Path variables (derived from `:name` segments in the URL — no remove/add, only edit)
+  updatePathVariable: (id: string, patch: Partial<KeyValue>) => void;
 
   // Headers
   updateHeader: (id: string, patch: Partial<KeyValue>) => void;
@@ -139,7 +205,11 @@ interface RequestState {
   // Lifecycle
   send: () => Promise<void>;
   newRequest: () => void;
-  loadRequest: (req: ApiRequest, savedRef?: SavedRequestRef | null) => void;
+  loadRequest: (
+    req: ApiRequest,
+    savedRef?: SavedRequestRef | null,
+    snapshot?: CachedResponse | null,
+  ) => void;
   importCurl: (text: string) => ParseCurlResult;
   saveToCollection: (collectionId: string, name: string) => ApiRequest | null;
   updateSaved: () => boolean;
@@ -149,7 +219,10 @@ export const useRequestStore = create<RequestState>()(
   persist(
     (set, get) => {
       const patch = (mutate: (r: ApiRequest) => ApiRequest) =>
-        set((s) => ({ request: { ...mutate(s.request), updatedAt: Date.now() } }));
+        set((s) => ({
+          request: { ...mutate(s.request), updatedAt: Date.now() },
+          isDirty: s.savedRef !== null,
+        }));
 
       return {
         request: normalizeForEditing(createRequest()),
@@ -158,14 +231,21 @@ export const useRequestStore = create<RequestState>()(
         isLoading: false,
         sentAt: null,
         savedRef: null,
+        isDirty: false,
         scriptRun: null,
         activeRequestTab: 'params',
         activeResponseTab: 'body',
+        responseCache: {},
 
         setMethod: (method) => patch((r) => ({ ...r, method })),
 
         setUrl: (url) =>
-          patch((r) => ({ ...r, url, params: withTrailingRow(paramsFromUrl(url)) })),
+          patch((r) => ({
+            ...r,
+            url,
+            params: withTrailingRow(paramsFromUrl(url)),
+            pathVariables: syncPathVariables(url, r.pathVariables),
+          })),
 
         setName: (name) => patch((r) => ({ ...r, name })),
 
@@ -182,6 +262,12 @@ export const useRequestStore = create<RequestState>()(
             const params = withTrailingRow(r.params.filter((kv) => kv.id !== id));
             return { ...r, params, url: urlWithParams(r.url, params) };
           }),
+
+        updatePathVariable: (id, p) =>
+          patch((r) => ({
+            ...r,
+            pathVariables: r.pathVariables.map((kv) => (kv.id === id ? { ...kv, ...p } : kv)),
+          })),
 
         updateHeader: (id, p) =>
           patch((r) => ({
@@ -319,13 +405,25 @@ export const useRequestStore = create<RequestState>()(
               scriptRun.pre?.error ||
                 scriptRun.post?.error ||
                 scriptRun.pre?.tests.length ||
-                scriptRun.post?.tests.length,
+                scriptRun.post?.tests.length ||
+                scriptRun.pre?.logs.length ||
+                scriptRun.post?.logs.length,
             );
-            set({
+            const finalScriptRun = hasScriptOutput ? scriptRun : null;
+            set((s) => ({
               isLoading: false,
-              scriptRun: hasScriptOutput ? scriptRun : null,
-              activeResponseTab: showTests ? 'tests' : result.ok ? 'body' : get().activeResponseTab,
-            });
+              scriptRun: finalScriptRun,
+              activeResponseTab: showTests ? 'tests' : result.ok ? 'body' : s.activeResponseTab,
+              responseCache: {
+                ...s.responseCache,
+                [responseCacheKey(request, s.savedRef)]: {
+                  response: result.ok ? result.response : null,
+                  error: result.ok ? null : result.error,
+                  scriptRun: finalScriptRun,
+                  sentAt: Date.now(),
+                },
+              },
+            }));
 
             useHistoryStore.getState().addEntry(
               {
@@ -335,17 +433,31 @@ export const useRequestStore = create<RequestState>()(
                 timestamp: Date.now(),
                 status: result.ok ? result.response.status : undefined,
                 request: structuredClone(request),
+                response: result.ok ? result.response : null,
+                error: result.ok ? null : result.error,
+                scriptRun: finalScriptRun,
               },
               useSettingsStore.getState().historyLimit,
             );
           } catch (err) {
-            set({
+            const caughtError: ApiError = { type: 'unknown', message: (err as Error).message };
+            const caughtScriptRun = scriptRun.pre || scriptRun.post ? scriptRun : null;
+            set((s) => ({
               response: null,
-              error: { type: 'unknown', message: (err as Error).message },
+              error: caughtError,
               isLoading: false,
-              scriptRun: scriptRun.pre || scriptRun.post ? scriptRun : null,
+              scriptRun: caughtScriptRun,
               sentAt: Date.now(),
-            });
+              responseCache: {
+                ...s.responseCache,
+                [responseCacheKey(request, s.savedRef)]: {
+                  response: null,
+                  error: caughtError,
+                  scriptRun: caughtScriptRun,
+                  sentAt: Date.now(),
+                },
+              },
+            }));
           }
         },
 
@@ -353,6 +465,7 @@ export const useRequestStore = create<RequestState>()(
           set({
             request: normalizeForEditing(createRequest()),
             savedRef: null,
+            isDirty: false,
             response: null,
             error: null,
             isLoading: false,
@@ -360,15 +473,19 @@ export const useRequestStore = create<RequestState>()(
             scriptRun: null,
           }),
 
-        loadRequest: (req, savedRef = null) =>
-          set({
-            request: normalizeForEditing(structuredClone(req)),
-            savedRef,
-            response: null,
-            error: null,
-            isLoading: false,
-            sentAt: null,
-            scriptRun: null,
+        loadRequest: (req, savedRef = null, snapshot) =>
+          set((s) => {
+            const cached = snapshot !== undefined ? snapshot : s.responseCache[responseCacheKey(req, savedRef)];
+            return {
+              request: normalizeForEditing(structuredClone(req)),
+              savedRef,
+              isDirty: false,
+              response: cached?.response ?? null,
+              error: cached?.error ?? null,
+              isLoading: false,
+              sentAt: cached?.sentAt ?? null,
+              scriptRun: cached?.scriptRun ?? null,
+            };
           }),
 
         importCurl: (text) => {
@@ -382,10 +499,20 @@ export const useRequestStore = create<RequestState>()(
             .getState()
             .addRequest(containerId, get().request, name);
           if (saved) {
-            set((s) => ({
-              savedRef: { containerId, requestId: saved.id },
-              request: { ...s.request, name: saved.name },
-            }));
+            set((s) => {
+              // Carry the draft's cached response over to the new saved id,
+              // so it's still there next time this saved request is opened.
+              const oldKey = responseCacheKey(s.request, s.savedRef);
+              const cached = s.responseCache[oldKey];
+              return {
+                savedRef: { containerId, requestId: saved.id },
+                isDirty: false,
+                request: { ...s.request, name: saved.name },
+                responseCache: cached
+                  ? { ...s.responseCache, [saved.id]: cached }
+                  : s.responseCache,
+              };
+            });
           }
           return saved;
         },
@@ -394,6 +521,7 @@ export const useRequestStore = create<RequestState>()(
           const { savedRef, request } = get();
           if (!savedRef) return false;
           useCollectionStore.getState().updateRequest({ ...request, id: savedRef.requestId });
+          set({ isDirty: false });
           return true;
         },
       };
@@ -406,6 +534,7 @@ export const useRequestStore = create<RequestState>()(
         savedRef: s.savedRef,
         activeRequestTab: s.activeRequestTab,
         activeResponseTab: s.activeResponseTab,
+        responseCache: s.responseCache,
       }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<RequestState>;
@@ -413,6 +542,7 @@ export const useRequestStore = create<RequestState>()(
           ...current,
           ...p,
           request: p.request ? normalizeForEditing(p.request) : current.request,
+          responseCache: p.responseCache ?? {},
         };
       },
     },

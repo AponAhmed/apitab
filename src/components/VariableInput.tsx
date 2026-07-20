@@ -4,12 +4,16 @@ import {
   useRef,
   useState,
   type InputHTMLAttributes,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type SyntheticEvent,
 } from 'react';
 import { cn } from '@/utils/cn';
-import { tokenizeVariables } from '@/utils/variables';
+import { findOpenVariableTrigger, tokenizeVariables, type VarSegment } from '@/utils/variables';
+import { findPathVariableRanges } from '@/utils/query';
 import { useActiveVariables } from '@/hooks/useActiveVariables';
 import { VariablePopover } from './VariablePopover';
+import { VariableAutocomplete } from './VariableAutocomplete';
 
 type BaseProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'className'>;
 
@@ -19,6 +23,40 @@ interface VariableInputProps extends BaseProps {
   className?: string;
   mono?: boolean;
   variant?: 'box' | 'bare';
+  /** Also highlight `:name` path-variable segments distinctly from `{{variables}}` — only meaningful for the URL bar. */
+  highlightPathVars?: boolean;
+}
+
+interface RenderSegment {
+  key: string;
+  text: string;
+  kind: 'text' | 'var' | 'pathvar';
+  varName?: string;
+}
+
+/** Merges `{{variable}}` segments with `:pathVar` ranges into one ordered list for the highlight overlay — the two never overlap (a variable name can't contain `:`). */
+function buildRenderSegments(
+  value: string,
+  varSegments: VarSegment[],
+  pathRanges: { name: string; start: number; end: number }[],
+): RenderSegment[] {
+  if (pathRanges.length === 0) {
+    return varSegments.map((s, i) => ({ key: String(i), text: s.value, kind: s.type, varName: s.name }));
+  }
+  const markers = [
+    ...varSegments.filter((s) => s.type === 'var').map((s) => ({ start: s.start, end: s.end, kind: 'var' as const, name: s.name })),
+    ...pathRanges.map((r) => ({ start: r.start, end: r.end, kind: 'pathvar' as const, name: r.name })),
+  ].sort((a, b) => a.start - b.start);
+
+  const out: RenderSegment[] = [];
+  let last = 0;
+  markers.forEach((m, i) => {
+    if (m.start > last) out.push({ key: `t${i}`, text: value.slice(last, m.start), kind: 'text' });
+    out.push({ key: `m${i}`, text: value.slice(m.start, m.end), kind: m.kind, varName: m.name });
+    last = m.end;
+  });
+  if (last < value.length) out.push({ key: 'tend', text: value.slice(last), kind: 'text' });
+  return out;
 }
 
 let measureCanvas: HTMLCanvasElement | null = null;
@@ -36,6 +74,14 @@ interface ActiveVar {
   y: number;
 }
 
+interface AutocompleteState {
+  triggerStart: number;
+  query: string;
+  x: number;
+  y: number;
+  highlightedIndex: number;
+}
+
 export function VariableInput({
   value,
   onValueChange,
@@ -43,6 +89,7 @@ export function VariableInput({
   mono = true,
   variant = 'box',
   placeholder,
+  highlightPathVars = false,
   ...rest
 }: VariableInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -51,11 +98,26 @@ export function VariableInput({
 
   const segments = useMemo(() => tokenizeVariables(value), [value]);
   const hasVars = useMemo(() => segments.some((s) => s.type === 'var'), [segments]);
+  const pathVarRanges = useMemo(
+    () => (highlightPathVars ? findPathVariableRanges(value) : []),
+    [highlightPathVars, value],
+  );
+  const renderSegments = useMemo(
+    () => buildRenderSegments(value, segments, pathVarRanges),
+    [value, segments, pathVarRanges],
+  );
 
   const [active, setActive] = useState<ActiveVar | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const overPopover = useRef(false);
   const popoverFocused = useRef(false);
+
+  const [autocomplete, setAutocomplete] = useState<AutocompleteState | null>(null);
+  const autocompleteNames = useMemo(() => {
+    if (!autocomplete) return [];
+    const q = autocomplete.query.toLowerCase();
+    return Object.keys(vars).filter((name) => name.toLowerCase().includes(q));
+  }, [autocomplete, vars]);
 
   const syncScroll = () => {
     const input = inputRef.current;
@@ -110,6 +172,67 @@ export function VariableInput({
     }
   };
 
+  const updateAutocomplete = (val: string, caret: number) => {
+    const trigger = findOpenVariableTrigger(val, caret);
+    const input = inputRef.current;
+    if (!trigger || !input) {
+      setAutocomplete(null);
+      return;
+    }
+    const cs = getComputedStyle(input);
+    const font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const padL = parseFloat(cs.paddingLeft) || 0;
+    const rect = input.getBoundingClientRect();
+    const left = measureText(val.slice(0, trigger.triggerStart), font);
+    const anchor = Math.max(0, Math.min(left + padL - input.scrollLeft, rect.width - 16));
+    const x = Math.max(8, Math.min(rect.left + anchor, window.innerWidth - 232));
+    setAutocomplete({ triggerStart: trigger.triggerStart, query: trigger.query, x, y: rect.bottom + 4, highlightedIndex: 0 });
+  };
+
+  const insertVariable = (name: string) => {
+    if (!autocomplete) return;
+    const input = inputRef.current;
+    const caret = input?.selectionStart ?? value.length;
+    const newValue = `${value.slice(0, autocomplete.triggerStart)}{{${name}}}${value.slice(caret)}`;
+    onValueChange(newValue);
+    setAutocomplete(null);
+    requestAnimationFrame(() => {
+      const pos = autocomplete.triggerStart + name.length + 4; // '{{' + name + '}}'
+      input?.setSelectionRange(pos, pos);
+      input?.focus();
+    });
+  };
+
+  const onSelect = (e: SyntheticEvent<HTMLInputElement>) => {
+    updateAutocomplete(e.currentTarget.value, e.currentTarget.selectionStart ?? 0);
+  };
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (!autocomplete) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setAutocomplete((s) =>
+        s && autocompleteNames.length > 0
+          ? { ...s, highlightedIndex: (s.highlightedIndex + 1) % autocompleteNames.length }
+          : s,
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setAutocomplete((s) =>
+        s && autocompleteNames.length > 0
+          ? { ...s, highlightedIndex: (s.highlightedIndex - 1 + autocompleteNames.length) % autocompleteNames.length }
+          : s,
+      );
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (autocompleteNames.length === 0) return;
+      e.preventDefault();
+      insertVariable(autocompleteNames[autocomplete.highlightedIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setAutocomplete(null);
+    }
+  };
+
   const pad = variant === 'box' ? 'px-2.5' : 'px-2';
 
   return (
@@ -135,23 +258,35 @@ export function VariableInput({
             {value === '' ? (
               <span className="text-slate-400 dark:text-slate-500">{placeholder}</span>
             ) : (
-              segments.map((seg, i) =>
-                seg.type === 'var' ? (
-                  <span
-                    key={i}
-                    className={cn(
-                      'rounded-[3px]',
-                      seg.name && Object.prototype.hasOwnProperty.call(vars, seg.name)
-                        ? 'bg-brand-500/10 text-brand-600 dark:bg-brand-400/15 dark:text-brand-300'
-                        : 'bg-amber-500/10 text-amber-600 dark:bg-amber-400/15 dark:text-amber-400',
-                    )}
-                  >
-                    {seg.value}
-                  </span>
-                ) : (
-                  <span key={i}>{seg.value}</span>
-                ),
-              )
+              renderSegments.map((seg) => {
+                if (seg.kind === 'var') {
+                  const hasValue = seg.varName && Object.prototype.hasOwnProperty.call(vars, seg.varName);
+                  return (
+                    <span
+                      key={seg.key}
+                      className={cn(
+                        'rounded-[3px]',
+                        hasValue
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-400'
+                          : 'bg-amber-500/10 text-amber-600 dark:bg-amber-400/15 dark:text-amber-400',
+                      )}
+                    >
+                      {seg.text}
+                    </span>
+                  );
+                }
+                if (seg.kind === 'pathvar') {
+                  return (
+                    <span
+                      key={seg.key}
+                      className="rounded-[3px] bg-violet-500/10 text-violet-600 dark:bg-violet-400/15 dark:text-violet-300"
+                    >
+                      {seg.text}
+                    </span>
+                  );
+                }
+                return <span key={seg.key}>{seg.text}</span>;
+              })
             )}
           </div>
         </div>
@@ -159,7 +294,13 @@ export function VariableInput({
         <input
           ref={inputRef}
           value={value}
-          onChange={(e) => onValueChange(e.target.value)}
+          onChange={(e) => {
+            onValueChange(e.target.value);
+            updateAutocomplete(e.target.value, e.target.selectionStart ?? e.target.value.length);
+          }}
+          onSelect={onSelect}
+          onKeyDown={onKeyDown}
+          onBlur={() => setAutocomplete(null)}
           onScroll={syncScroll}
           onMouseMove={onMouseMove}
           onMouseLeave={scheduleHide}
@@ -172,6 +313,17 @@ export function VariableInput({
           {...rest}
         />
       </div>
+
+      {autocomplete && (
+        <VariableAutocomplete
+          names={autocompleteNames}
+          highlightedIndex={autocomplete.highlightedIndex}
+          x={autocomplete.x}
+          y={autocomplete.y}
+          onSelect={insertVariable}
+          onHighlight={(i) => setAutocomplete((s) => (s ? { ...s, highlightedIndex: i } : s))}
+        />
+      )}
 
       {active && (
         <VariablePopover

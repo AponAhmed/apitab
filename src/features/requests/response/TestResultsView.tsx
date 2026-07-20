@@ -30,7 +30,7 @@ export function TestResultsView() {
       <EmptyState
         icon={FlaskConical}
         title="No test results"
-        description="Add a Post-response script (Scripts tab) with pm.test(...) to see results here."
+        description="Add a Post-response script (Scripts tab) with apitab.test(...) to see results here."
       />
     );
   }

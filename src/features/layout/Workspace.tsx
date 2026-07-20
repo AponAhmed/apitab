@@ -3,17 +3,24 @@ import { useApplyTheme } from '@/hooks/useApplyTheme';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useRequestActions } from '@/hooks/useRequestActions';
 import { usePanelResize, useHorizontalResize } from '@/hooks/usePanelResize';
+import { useTeamSync } from '@/hooks/useTeamSync';
+import { useAnalyticsSession } from '@/hooks/useAnalyticsSession';
+import { useAutoSaveRequest } from '@/hooks/useAutoSaveRequest';
 import { TopBar } from './TopBar';
 import { Sidebar, SidebarRail } from './Sidebar';
 import { RequestToolbar } from '@/features/requests/RequestToolbar';
 import { UrlBar } from '@/features/requests/UrlBar';
 import { RequestEditor } from '@/features/requests/RequestEditor';
 import { ResponsePanel } from '@/features/requests/ResponsePanel';
+import { RecentRequestsBar } from './RecentRequestsBar';
 import { AppDialogs } from '@/components/AppDialogs';
 import { Toaster } from '@/components/Toaster';
 
 export function Workspace() {
   useApplyTheme();
+  useTeamSync();
+  useAnalyticsSession();
+  useAutoSaveRequest();
 
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const responseHeight = useUiStore((s) => s.responseHeight);
@@ -53,7 +60,7 @@ export function Workspace() {
             <UrlBar />
           </div>
 
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <RequestEditor />
           </div>
 
@@ -68,6 +75,8 @@ export function Workspace() {
           <div style={{ height: responseHeight }} className="min-h-0 shrink-0">
             <ResponsePanel />
           </div>
+
+          <RecentRequestsBar />
         </main>
       </div>
 

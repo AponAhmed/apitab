@@ -1,16 +1,23 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { Download, Monitor, Moon, Sun, Trash2, Upload } from 'lucide-react';
+import { Download, KeyRound, LogIn, LogOut, Monitor, Moon, RefreshCw, Sun, Trash2, Upload, Users } from 'lucide-react';
 import { useApplyTheme } from '@/hooks/useApplyTheme';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useCollectionStore } from '@/stores/collectionStore';
 import { useEnvironmentStore } from '@/stores/environmentStore';
 import { useHistoryStore } from '@/stores/historyStore';
+import { useAccountStore } from '@/stores/accountStore';
+import { useTeamStore } from '@/stores/teamStore';
+import { useDialogStore } from '@/stores/dialogStore';
+import { apiClient } from '@/services/apiClient';
+import { clearTeamCollectionsOnLogout, runAllTeamsSync } from '@/services/syncService';
 import { toast } from '@/stores/toastStore';
 import { Toaster } from '@/components/Toaster';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Logo } from '@/components/Logo';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { LoginDialog } from '@/features/account/LoginDialog';
+import { ChangePasswordDialog } from '@/features/account/ChangePasswordDialog';
 import { ABOUT } from '@/config/about';
 import { ExternalLink, GitBranch, Mail } from 'lucide-react';
 import {
@@ -56,8 +63,29 @@ export function OptionsPage() {
   const historyLimit = useSettingsStore((s) => s.historyLimit);
   const setHistoryLimit = useSettingsStore((s) => s.setHistoryLimit);
 
+  const session = useAccountStore((s) => s.session);
+  const clearSession = useAccountStore((s) => s.clearSession);
+  const teams = useTeamStore((s) => s.teams);
+  const isSyncing = useTeamStore((s) => s.isSyncing);
+  const syncError = useTeamStore((s) => s.lastSyncError);
+  const resetTeams = useTeamStore((s) => s.reset);
+  const openLogin = useDialogStore((s) => s.openLogin);
+
+  const logout = async () => {
+    try {
+      await apiClient.logout();
+    } catch {
+      // Token may already be invalid server-side — clear locally regardless.
+    }
+    clearSession();
+    resetTeams();
+    clearTeamCollectionsOnLogout();
+    toast.info('Logged out');
+  };
+
   const fileRef = useRef<HTMLInputElement>(null);
   const [clearOpen, setClearOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   const exportData = () => {
     const data = buildBackup({
@@ -156,6 +184,76 @@ export function OptionsPage() {
                 />
               </label>
             </div>
+          </Section>
+
+          <Section
+            title="Account & Teams"
+            description="Log in to share collections with a team. Environments are never sent to the server — only collections you explicitly share."
+          >
+            {!session ? (
+              <Button variant="outline" onClick={openLogin}>
+                <LogIn className="h-4 w-4" />
+                Log in / Create account
+              </Button>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2.5 dark:border-slate-700">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                      {session.user.name}
+                    </p>
+                    <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                      {session.user.email}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button variant="ghost" size="sm" onClick={() => setChangePasswordOpen(true)}>
+                      <KeyRound className="h-3.5 w-3.5" />
+                      Change password
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => void logout()}>
+                      <LogOut className="h-3.5 w-3.5" />
+                      Log out
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                      <Users className="h-3.5 w-3.5" />
+                      Teams ({teams.length})
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void runAllTeamsSync()}
+                      disabled={isSyncing || teams.length === 0}
+                    >
+                      <RefreshCw className={cn('h-3.5 w-3.5', isSyncing && 'animate-spin')} />
+                      Sync now
+                    </Button>
+                  </div>
+                  {teams.length === 0 ? (
+                    <p className="text-xs text-slate-400">
+                      No teams yet — create one from the account menu in the toolbar.
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 text-sm dark:divide-slate-800 dark:border-slate-700">
+                      {teams.map((t) => (
+                        <li key={t.id} className="flex items-center justify-between px-3 py-2">
+                          <span className="text-slate-700 dark:text-slate-200">{t.name}</span>
+                          <span className="text-xs capitalize text-slate-400">{t.role}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {syncError && (
+                    <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{syncError}</p>
+                  )}
+                </div>
+              </div>
+            )}
           </Section>
 
           <Section
@@ -279,6 +377,8 @@ export function OptionsPage() {
         onConfirm={clearAll}
         onClose={() => setClearOpen(false)}
       />
+      <LoginDialog />
+      <ChangePasswordDialog open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
       <Toaster />
     </div>
   );

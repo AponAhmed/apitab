@@ -10,21 +10,33 @@ import {
   Search,
   Trash2,
   Upload,
+  User,
+  UserMinus,
+  Users,
 } from 'lucide-react';
 import { useCollectionStore } from '@/stores/collectionStore';
 import { useRequestStore } from '@/stores/requestStore';
+import { useEnvironmentStore } from '@/stores/environmentStore';
+import { useTeamStore } from '@/stores/teamStore';
+import { useAccountStore } from '@/stores/accountStore';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { useUiStore } from '@/stores/uiStore';
+import { useDialogStore } from '@/stores/dialogStore';
 import { toast } from '@/stores/toastStore';
+import { unshareCollection } from '@/services/syncService';
 import { IconButton } from '@/components/ui/IconButton';
 import { Menu, type MenuItem } from '@/components/ui/Menu';
 import { MethodBadge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PromptDialog } from '@/components/PromptDialog';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { ShareToTeamDialog } from './ShareToTeamDialog';
 import { cn } from '@/utils/cn';
 import { countRequests, isCollection } from '@/utils/collectionTree';
 import { exportContainer, parseCollectionExport, sanitizeFilename } from '@/utils/collectionIO';
+import { parsePostmanFile } from '@/utils/postmanImport';
 import { downloadJson, readFileAsText } from '@/services/backup';
-import type { ApiRequest, Collection, Container } from '@/types';
+import type { ApiRequest, Collection, Container, TeamRole } from '@/types';
 
 interface CollectionActions {
   activeRequestId: string | null;
@@ -37,6 +49,8 @@ interface CollectionActions {
   importInto: (containerId: string) => void;
   duplicateRequest: (id: string) => void;
   deleteRequest: (req: ApiRequest) => void;
+  shareToTeam: (collectionId: string) => void;
+  unshare: (container: Container) => void;
 }
 
 const ActionsContext = createContext<CollectionActions | null>(null);
@@ -55,6 +69,7 @@ function RequestNode({
 }) {
   const actions = useActions();
   const active = actions.activeRequestId === request.id;
+  const isDirty = useRequestStore((s) => s.isDirty);
   const items: MenuItem[] = [
     { label: 'Duplicate', icon: Copy, onClick: () => actions.duplicateRequest(request.id) },
     { label: 'Delete', icon: Trash2, danger: true, onClick: () => actions.deleteRequest(request) },
@@ -65,8 +80,8 @@ function RequestNode({
       onClick={() => actions.openRequest(containerId, request)}
       style={{ paddingLeft: depth * INDENT + 6 }}
       className={cn(
-        'group flex cursor-pointer items-center gap-1.5 rounded-md py-1 pr-1 hover:bg-slate-100 dark:hover:bg-slate-800/70',
-        active && 'bg-brand-50 dark:bg-brand-950/40',
+        'group flex cursor-pointer items-center gap-1.5 rounded-md py-0.5 pr-1 hover:bg-slate-100 dark:hover:bg-slate-800/70',
+        active && 'bg-brand-100 dark:bg-brand-900/40',
       )}
     >
       <span className="w-9 shrink-0 text-right">
@@ -75,6 +90,13 @@ function RequestNode({
       <span className="min-w-0 flex-1 truncate text-xs text-slate-600 dark:text-slate-300">
         {request.name || request.url || 'Untitled'}
       </span>
+      {active && isDirty && (
+        <span
+          className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
+          title="Unsaved changes — saving shortly"
+          aria-label="Unsaved changes"
+        />
+      )}
       <div className="opacity-0 group-hover:opacity-100">
         <Menu items={items} label="Request actions" />
       </div>
@@ -87,14 +109,23 @@ function ContainerNode({
   depth,
   collapsed,
   toggle,
+  role,
+  currentUserId,
 }: {
   container: Container;
   depth: number;
   collapsed: Record<string, boolean>;
   toggle: (id: string) => void;
+  /** This device's role on the owning team, when `container` is a shared root collection. */
+  role?: TeamRole;
+  currentUserId?: string | null;
 }) {
   const actions = useActions();
   const root = isCollection(container);
+  const teamId = root ? (container as Collection).teamId : undefined;
+  const createdBy = root ? (container as Collection).createdBy : undefined;
+  const canManageAccess =
+    root && !!teamId && (role === 'owner' || role === 'admin' || createdBy === currentUserId);
   const isCollapsed = !!collapsed[container.id];
   const empty = container.folders.length === 0 && container.requests.length === 0;
 
@@ -104,6 +135,15 @@ function ContainerNode({
     { label: 'Duplicate', icon: Copy, onClick: () => actions.duplicate(container.id) },
     { label: 'Export', icon: Download, separatorBefore: true, onClick: () => actions.exportItem(container) },
     { label: 'Import here', icon: Upload, onClick: () => actions.importInto(container.id) },
+    ...(root && !teamId
+      ? [{ label: 'Share to team…', icon: Users, onClick: () => actions.shareToTeam(container.id) }]
+      : []),
+    ...(canManageAccess
+      ? [{ label: 'Manage access…', icon: Users, onClick: () => actions.shareToTeam(container.id) }]
+      : []),
+    ...(canManageAccess
+      ? [{ label: 'Unshare…', icon: UserMinus, onClick: () => actions.unshare(container) }]
+      : []),
     {
       label: root ? 'Delete collection' : 'Delete folder',
       icon: Trash2,
@@ -117,7 +157,7 @@ function ContainerNode({
     <div>
       <div
         style={{ paddingLeft: depth * INDENT + 4 }}
-        className="group flex items-center gap-1 rounded-md py-1 pr-1 hover:bg-slate-100 dark:hover:bg-slate-800/70"
+        className="group flex items-center gap-1 rounded-md py-0.5 pr-1 hover:bg-slate-100 dark:hover:bg-slate-800/70"
       >
         <button
           onClick={() => toggle(container.id)}
@@ -137,6 +177,18 @@ function ContainerNode({
           >
             {container.name}
           </span>
+          {teamId && (
+            <span
+              title={
+                role === 'member'
+                  ? 'Shared with team — your edits stay local to this device'
+                  : 'Shared with team — you can edit for everyone'
+              }
+              className="shrink-0"
+            >
+              <Users className="h-3 w-3 text-brand-500" />
+            </span>
+          )}
           <span className="shrink-0 text-[10px] text-slate-400">{countRequests(container)}</span>
         </button>
         <div className="opacity-0 group-hover:opacity-100">
@@ -161,6 +213,51 @@ function ContainerNode({
       )}
     </div>
   );
+}
+
+interface WorkspaceGroup {
+  key: string;
+  label: string;
+  isTeam: boolean;
+  role?: TeamRole;
+  collections: Collection[];
+}
+
+/** Groups collections into a personal section + one per team, so shared and own collections read as visually distinct spaces. */
+function groupByWorkspace(
+  collections: Collection[],
+  teams: { id: string; name: string; role: TeamRole }[],
+  personalLabel: string,
+  currentUserId: string | null,
+): WorkspaceGroup[] {
+  const groups: WorkspaceGroup[] = [];
+
+  const personal = collections.filter((c) => !c.teamId);
+  if (personal.length > 0) {
+    groups.push({ key: 'personal', label: personalLabel, isTeam: false, collections: personal });
+  }
+
+  for (const team of teams) {
+    const teamCollections = collections.filter((c) => c.teamId === team.id);
+    if (teamCollections.length > 0) {
+      groups.push({ key: team.id, label: team.name, isTeam: true, role: team.role, collections: teamCollections });
+    }
+  }
+
+  // A collection tagged with a team this device no longer recognizes (left
+  // the team, or the team was deleted). Only keep showing it if it might be
+  // this user's own (created it, or we can't tell because it predates
+  // `createdBy` / came from an older sync) — someone else's collection in a
+  // team we no longer belong to should simply disappear, not linger forever.
+  const knownTeamIds = new Set(teams.map((t) => t.id));
+  const orphaned = collections.filter(
+    (c) => c.teamId && !knownTeamIds.has(c.teamId) && (!c.createdBy || c.createdBy === currentUserId),
+  );
+  if (orphaned.length > 0) {
+    groups.push({ key: 'orphaned', label: 'Shared (team unavailable)', isTeam: true, collections: orphaned });
+  }
+
+  return groups;
 }
 
 function filterContainer<T extends Container>(container: T, q: string): T | null {
@@ -189,20 +286,39 @@ export function CollectionsPanel() {
 
   const loadRequest = useRequestStore((s) => s.loadRequest);
   const activeRequestId = useRequestStore((s) => s.savedRef?.requestId ?? null);
+  const openShareToTeam = useDialogStore((s) => s.openShareToTeam);
+  const teams = useTeamStore((s) => s.teams);
+  const activeTeamId = useTeamStore((s) => s.activeTeamId);
+  const setActiveTeam = useTeamStore((s) => s.setActiveTeam);
+  const currentUserId = useAccountStore((s) => s.session?.user.id ?? null);
+  const personalWorkspaceName = useSettingsStore((s) => s.personalWorkspaceName);
+  const setPersonalWorkspaceName = useSettingsStore((s) => s.setPersonalWorkspaceName);
+
+  const environments = useEnvironmentStore((s) => s.environments);
+  const activeEnvId = useEnvironmentStore((s) => s.activeEnvironmentId);
+  const createEnvironment = useEnvironmentStore((s) => s.createEnvironment);
+  const setActiveEnvironment = useEnvironmentStore((s) => s.setActiveEnvironment);
+  const upsertVariable = useEnvironmentStore((s) => s.upsertVariable);
+
+  const collapsed = useUiStore((s) => s.collapsedContainers);
+  const toggleContainerCollapsed = useUiStore((s) => s.toggleContainerCollapsed);
 
   const [search, setSearch] = useState('');
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [folderParent, setFolderParent] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<
     { id: string; name: string; kind: 'container' | 'request' } | null
   >(null);
+  const [unshareTarget, setUnshareTarget] = useState<{ id: string; name: string; teamId: string } | null>(
+    null,
+  );
+  const [personalRenameOpen, setPersonalRenameOpen] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const importTarget = useRef<string | null>(null);
 
-  const toggle = (id: string) => setCollapsed((m) => ({ ...m, [id]: !m[id] }));
+  const toggle = (id: string) => toggleContainerCollapsed(id);
 
   const q = search.trim().toLowerCase();
   const visible = useMemo(
@@ -215,6 +331,21 @@ export function CollectionsPanel() {
     [collections, q],
   );
 
+  const groups = useMemo(
+    () => groupByWorkspace(visible, teams, personalWorkspaceName, currentUserId),
+    [visible, teams, personalWorkspaceName, currentUserId],
+  );
+
+  // Only the current workspace's own section shows — "orphaned" (a
+  // collection whose team this device no longer recognizes) stays visible
+  // regardless, since it doesn't belong to any selectable workspace and
+  // hiding it further would make that data seem to vanish.
+  const activeWorkspaceKey = activeTeamId ?? 'personal';
+  const visibleGroups = useMemo(
+    () => groups.filter((g) => g.key === 'orphaned' || g.key === activeWorkspaceKey),
+    [groups, activeWorkspaceKey],
+  );
+
   const actions: CollectionActions = {
     activeRequestId,
     openRequest: (containerId, req) => loadRequest(req, { containerId, requestId: req.id }),
@@ -222,9 +353,21 @@ export function CollectionsPanel() {
     rename: (c) => setRenameTarget({ id: c.id, name: c.name }),
     duplicate: (id) => duplicateContainer(id),
     removeContainer: (c) => setDeleteTarget({ id: c.id, name: c.name, kind: 'container' }),
+    unshare: (c) => {
+      const teamId = (c as Collection).teamId;
+      if (teamId) setUnshareTarget({ id: c.id, name: c.name, teamId });
+    },
     exportItem: (c) => {
-      downloadJson(`apitab-${sanitizeFilename(c.name)}.json`, exportContainer(c));
-      toast.success('Exported');
+      const activeEnv = environments.find((e) => e.id === activeEnvId);
+      const sharedVars = (activeEnv?.variables ?? [])
+        .filter((v) => v.shared && v.key.trim() !== '')
+        .map((v) => ({ key: v.key.trim(), value: v.value }));
+      downloadJson(`apitab-${sanitizeFilename(c.name)}.json`, exportContainer(c, sharedVars));
+      toast.success(
+        sharedVars.length
+          ? `Exported with ${sharedVars.length} shared variable${sharedVars.length === 1 ? '' : 's'}`
+          : 'Exported',
+      );
     },
     importInto: (containerId) => {
       importTarget.current = containerId;
@@ -232,18 +375,62 @@ export function CollectionsPanel() {
     },
     duplicateRequest,
     deleteRequest: (req) => setDeleteTarget({ id: req.id, name: req.name, kind: 'request' }),
+    shareToTeam: (collectionId) => openShareToTeam(collectionId),
+  };
+
+  const importCollectionExport = (data: NonNullable<ReturnType<typeof parseCollectionExport>['data']>) => {
+    const target = importTarget.current;
+    if (target) importIntoContainer(target, data);
+    else {
+      importAsCollection(data);
+      // New imports always land in the personal workspace — switch there so
+      // the result isn't immediately hidden by the active-workspace filter.
+      if (activeTeamId !== null) setActiveTeam(null);
+    }
+
+    const sharedVars = data.environmentVariables;
+    if (sharedVars?.length) {
+      let envId = activeEnvId;
+      let envName = environments.find((e) => e.id === envId)?.name;
+      if (!envId) {
+        const created = createEnvironment('Imported');
+        envId = created.id;
+        envName = created.name;
+        setActiveEnvironment(envId);
+      }
+      for (const v of sharedVars) upsertVariable(envId, v.key, v.value);
+      toast.success(
+        `Imported with ${sharedVars.length} shared variable${sharedVars.length === 1 ? '' : 's'} into "${envName}"`,
+      );
+    } else {
+      toast.success('Imported');
+    }
   };
 
   const onFile = async (file: File) => {
-    const parsed = parseCollectionExport(await readFileAsText(file));
-    if (!parsed.ok || !parsed.data) {
-      toast.error(parsed.error ?? 'Invalid file');
+    const raw = await readFileAsText(file);
+
+    const native = parseCollectionExport(raw);
+    if (native.ok && native.data) {
+      importCollectionExport(native.data);
       return;
     }
-    const target = importTarget.current;
-    if (target) importIntoContainer(target, parsed.data);
-    else importAsCollection(parsed.data);
-    toast.success('Imported');
+
+    // Not an ApiTab export — try it as a Postman collection or environment.
+    const postman = parsePostmanFile(raw);
+    if (postman.ok && postman.data) {
+      importCollectionExport(postman.data);
+      return;
+    }
+    if (postman.ok && postman.environment) {
+      const created = createEnvironment(postman.environment.name);
+      setActiveEnvironment(created.id);
+      for (const v of postman.environment.variables) upsertVariable(created.id, v.key, v.value);
+      toast.success(`Imported "${created.name}" with ${postman.environment.variables.length} variables`);
+      return;
+    }
+
+    toast.error(native.error ?? 'Invalid file — not an ApiTab or Postman export');
   };
 
   return (
@@ -274,7 +461,7 @@ export function CollectionsPanel() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-1 pb-2">
-        {visible.length === 0 ? (
+        {visibleGroups.length === 0 ? (
           <EmptyState
             icon={Folder}
             title={q ? 'No matches' : 'No collections'}
@@ -282,14 +469,59 @@ export function CollectionsPanel() {
           />
         ) : (
           <ActionsContext.Provider value={actions}>
-            {visible.map((c) => (
-              <ContainerNode
-                key={c.id}
-                container={c}
-                depth={0}
-                collapsed={q ? {} : collapsed}
-                toggle={toggle}
-              />
+            {visibleGroups.map((group) => (
+              <div key={group.key} className="mb-3">
+                <div
+                  className={cn(
+                    'group/ws mb-1 flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide',
+                    group.isTeam ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500',
+                  )}
+                >
+                  {group.isTeam ? (
+                    <Users className="h-3 w-3 shrink-0" />
+                  ) : (
+                    <User className="h-3 w-3 shrink-0" />
+                  )}
+                  <span className="truncate">{group.label}</span>
+                  {group.role && (
+                    <span
+                      className={cn(
+                        'shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium normal-case',
+                        group.role === 'member'
+                          ? 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                          : 'bg-brand-100 text-brand-700 dark:bg-brand-950 dark:text-brand-300',
+                      )}
+                    >
+                      {group.role}
+                    </span>
+                  )}
+                  {!group.isTeam && (
+                    <button
+                      onClick={() => setPersonalRenameOpen(true)}
+                      title="Rename workspace"
+                      aria-label="Rename workspace"
+                      className="ml-auto shrink-0 rounded p-0.5 text-slate-400 opacity-0 hover:bg-slate-200 hover:text-slate-600 group-hover/ws:opacity-100 dark:hover:bg-slate-700 dark:hover:text-slate-300"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+                <div
+                  className={cn(group.isTeam && 'rounded-md border-l border-brand-200 dark:border-brand-900')}
+                >
+                  {group.collections.map((c) => (
+                    <ContainerNode
+                      key={c.id}
+                      container={c}
+                      depth={0}
+                      collapsed={q ? {} : collapsed}
+                      toggle={toggle}
+                      role={group.role}
+                      currentUserId={currentUserId}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </ActionsContext.Provider>
         )}
@@ -313,7 +545,12 @@ export function CollectionsPanel() {
         label="Collection name"
         placeholder="My Collection"
         confirmLabel="Create"
-        onConfirm={(v) => createCollection(v)}
+        onConfirm={(v) => {
+          createCollection(v);
+          // New collections always land in the personal workspace — switch
+          // there so it isn't immediately hidden by the active-workspace filter.
+          if (activeTeamId !== null) setActiveTeam(null);
+        }}
         onClose={() => setCreateOpen(false)}
       />
       <PromptDialog
@@ -334,6 +571,15 @@ export function CollectionsPanel() {
         onConfirm={(v) => renameTarget && renameContainer(renameTarget.id, v)}
         onClose={() => setRenameTarget(null)}
       />
+      <PromptDialog
+        open={personalRenameOpen}
+        title="Rename Workspace"
+        label="Workspace name"
+        initialValue={personalWorkspaceName}
+        confirmLabel="Rename"
+        onConfirm={(v) => setPersonalWorkspaceName(v)}
+        onClose={() => setPersonalRenameOpen(false)}
+      />
       <ConfirmDialog
         open={!!deleteTarget}
         title={deleteTarget?.kind === 'request' ? 'Delete Request' : 'Delete'}
@@ -351,6 +597,30 @@ export function CollectionsPanel() {
         }}
         onClose={() => setDeleteTarget(null)}
       />
+      <ConfirmDialog
+        open={!!unshareTarget}
+        title="Unshare"
+        confirmLabel="Unshare"
+        message={
+          <>
+            Unshare <b>{unshareTarget?.name || 'this collection'}</b>? Everyone else on the team
+            loses access, but it stays in your own workspace as a personal collection.
+          </>
+        }
+        onConfirm={() => {
+          if (!unshareTarget) return;
+          unshareCollection(unshareTarget.id, unshareTarget.teamId)
+            .then(() => {
+              toast.success(`"${unshareTarget.name}" is no longer shared`);
+              // It's personal again now — follow it there so it doesn't
+              // vanish from the sidebar's active-workspace-only filter.
+              setActiveTeam(null);
+            })
+            .catch(() => toast.error('Could not unshare this collection'));
+        }}
+        onClose={() => setUnshareTarget(null)}
+      />
+      <ShareToTeamDialog />
     </div>
   );
 }

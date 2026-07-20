@@ -40,7 +40,7 @@ export function UrlBar() {
         aria-label="HTTP method"
       >
         {HTTP_METHODS.map((m) => (
-          <option key={m} value={m} className="font-semibold text-slate-800 dark:text-slate-100">
+          <option key={m} value={m} className={cn('font-bold', methodColor(m))}>
             {m}
           </option>
         ))}
@@ -53,6 +53,7 @@ export function UrlBar() {
         placeholder="https://api.example.com  or  {{base_url}}/users"
         className="flex-1"
         aria-label="Request URL"
+        highlightPathVars
       />
 
       <Button
