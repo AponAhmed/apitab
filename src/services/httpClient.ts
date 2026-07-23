@@ -6,10 +6,14 @@ function classifyError(err: unknown): ApiError {
     return { type: 'timeout', message: 'Request timed out.' };
   }
   if (err instanceof TypeError) {
+    // Chromium rarely gives more than "Failed to fetch", but surface
+    // anything beyond that generic text when it's available.
+    const detail = err.message && err.message !== 'Failed to fetch' ? err.message : undefined;
     return {
       type: 'network',
-      message:
-        'Network error — the host may be unreachable, the DNS lookup failed, or the request was blocked.',
+      message: detail
+        ? `Network error: ${detail}`
+        : 'Network error — the host may be unreachable, the DNS lookup failed, or the request was blocked.',
     };
   }
   return { type: 'unknown', message: (err as Error)?.message ?? 'Unknown error' };
