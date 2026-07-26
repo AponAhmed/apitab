@@ -1,6 +1,6 @@
 # ApiTab
 
-> A lightweight, local‑first API testing browser extension — a fast, minimal alternative to Postman.
+> A lightweight, local‑first API testing browser extension — a fast, minimal API client.
 
 ApiTab opens instantly inside your browser and gives you a frictionless API testing experience: build requests, manage collections and environments, generate code snippets, and import/export cURL — all stored locally, **no login and no cloud required**.
 

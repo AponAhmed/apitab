@@ -8,7 +8,7 @@ export default defineConfig({
   manifest: ({ browser }) => ({
     name: 'ApiTab',
     description:
-      'Lightweight, local-first API testing tool — a fast, minimal alternative to Postman.',
+      'Lightweight, local-first API testing tool — a fast, minimal API client.',
     // `storage` for persistence; `alarms` drives the periodic team-sync poll
     // (survives service worker suspension, unlike setInterval). Host
     // permissions let extension pages perform cross-origin API requests
