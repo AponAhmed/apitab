@@ -1,4 +1,5 @@
 import type { ApiError, RequestResult, ResponseHeader } from '@/types';
+import { base64ToArrayBuffer } from '@/utils/binary';
 import type { WireRequest } from './messaging';
 
 function classifyError(err: unknown): ApiError {
@@ -52,10 +53,24 @@ export async function executeHttp(req: WireRequest): Promise<RequestResult> {
     if (methodAllowsBody) {
       if (req.bodyType === 'form-data' && req.formData?.length) {
         const fd = new FormData();
-        for (const f of req.formData) if (f.key) fd.append(f.key, f.value);
+        for (const f of req.formData) {
+          if (!f.key) continue;
+          if (f.fileData) {
+            const bytes = base64ToArrayBuffer(f.fileData);
+            fd.append(f.key, new Blob([bytes], { type: f.fileType || 'application/octet-stream' }), f.fileName || 'file');
+          } else {
+            fd.append(f.key, f.value);
+          }
+        }
         body = fd;
         // Let the browser set the multipart boundary.
         headers.delete('content-type');
+      } else if (req.bodyType === 'binary' && req.binary) {
+        // A Blob body's own `type` becomes the Content-Type header
+        // automatically per the fetch spec, but only when the caller hasn't
+        // already set one — an explicit header (set below) still wins.
+        const bytes = base64ToArrayBuffer(req.binary.fileData);
+        body = new Blob([bytes], { type: req.binary.fileType || 'application/octet-stream' });
       } else if (req.body) {
         body = req.body;
       }
