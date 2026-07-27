@@ -14,8 +14,21 @@ export default defineConfig({
     // permissions let extension pages perform cross-origin API requests
     // (both the user's tested APIs and the team-sync backend) without CORS
     // restrictions.
-    permissions: ['storage', 'alarms'],
+    permissions: ['storage', 'alarms', 'identity'],
     host_permissions: ['<all_urls>'],
+    // Pins the Chrome extension's id (otherwise it's derived from the local
+    // install path and differs per machine for a "Load unpacked" install).
+    // A stable id is required for Google Sign-In: chrome.identity.launchWebAuthFlow's
+    // redirect is https://<id>.chromiumapp.org/, which has to be registered
+    // as a fixed Authorized redirect URI on the Google OAuth client ahead of
+    // time. This is the *public* half of a keypair generated once — losing
+    // the private half only matters if this extension is later packed into a
+    // signed .crx or uploaded as the very first Chrome Web Store version.
+    ...(browser !== 'firefox'
+      ? {
+          key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsy1UiholtHg/WK6omvoxZpMESHdWbemCh8YLBSTlnqFmrmQvEvdBrjkz0Jpnwu8rsqmNAJaMDIeX0GB+S91H1sC4AKaqqNT5IuPb1zg58ImLiZCOLEhUCeBx3iquBzrwh+Cw7QOXRb1qDy/4A/nKkchJsZgCQa63SleS3DQoxrOjUkxlvy0gR6Rw551sGAU0OxWa3Kz+0p81VsSkS7NVwo2DX4ZmdaVwF9HLCnA0xW00KCCdmUoqEUK03ict1BfeiLE3tT61T6m+vGEPnaMe6u+K865c8B45dvidnuxj9Y20caCKO3Xfoh55NudJ7u1aUWKRgD6a7gmPURaoQCF0yQIDAQAB',
+        }
+      : {}),
     action: {
       default_title: 'ApiTab — Open API tester',
     },
