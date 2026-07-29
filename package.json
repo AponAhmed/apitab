@@ -2,7 +2,7 @@
   "name": "apitab",
   "displayName": "ApiTab",
   "description": "Lightweight, local-first API testing browser extension — a fast, minimal API client.",
-  "version": "0.11.13",
+  "version": "0.11.14",
   "type": "module",
   "private": true,
   "scripts": {
