@@ -401,8 +401,22 @@ async function runAllTeamsSyncInner(opts?: { skipRehydrate?: boolean; silent?: b
     // hydrating from browser.storage.local yet — make sure it has before
     // trusting `session`/`teams`, otherwise a cold wake could read stale
     // (empty) initial state and silently skip a poll.
+    //
+    // collections/teamVariables need the same guard for a different reason:
+    // mergeSync (below, via runSyncTick) upserts the *pulled delta* onto
+    // whatever's currently in memory — `{ ...current, ...incoming }` — so if
+    // this sync's network round trip resolves before that store's own
+    // (separate, unawaited) persist hydration finishes, mergeSync runs
+    // against an empty in-memory array, and the truncated result (just this
+    // delta) gets persisted, silently overwriting the real on-disk data.
+    // Concretely: accept a shared collection, close the browser (killing the
+    // MV3 service worker), reopen it — the worker respawns with fresh
+    // module state, and if this sync tick's fetch beats collectionStore's
+    // own hydration, the just-accepted collection quietly vanishes.
     await useAccountStore.persist.rehydrate();
     await useTeamStore.persist.rehydrate();
+    await useCollectionStore.persist.rehydrate();
+    await useTeamVariablesStore.persist.rehydrate();
   }
 
   const session = useAccountStore.getState().session;
