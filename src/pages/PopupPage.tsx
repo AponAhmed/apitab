@@ -1,5 +1,6 @@
 import { ExternalLink, History as HistoryIcon } from 'lucide-react';
 import { useApplyTheme } from '@/hooks/useApplyTheme';
+import { useApplyAccentColor } from '@/hooks/useApplyAccentColor';
 import { useHistoryStore } from '@/stores/historyStore';
 import { useRequestStore } from '@/stores/requestStore';
 import { openWorkspace } from '@/services/workspace';
@@ -11,6 +12,7 @@ import type { HistoryEntry } from '@/types';
 
 export function PopupPage() {
   useApplyTheme();
+  useApplyAccentColor();
   const entries = useHistoryStore((s) => s.entries).slice(0, 7);
   const loadRequest = useRequestStore((s) => s.loadRequest);
 
