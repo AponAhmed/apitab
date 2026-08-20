@@ -42,6 +42,7 @@ import { RunnerPanel } from '@/features/runner/RunnerPanel';
 import { cn } from '@/utils/cn';
 import { countRequests, flattenRequests, isCollection } from '@/utils/collectionTree';
 import { exportContainer, parseCollectionExport, sanitizeFilename } from '@/utils/collectionIO';
+import { exportToEnvironment, parseEnvironmentExport } from '@/utils/environmentIO';
 import { parsePostmanFile } from '@/utils/postmanImport';
 import { downloadJson, readFileAsText } from '@/services/backup';
 import { createRequest } from '@/utils/defaults';
@@ -475,6 +476,7 @@ export function CollectionsPanel() {
   const createEnvironment = useEnvironmentStore((s) => s.createEnvironment);
   const setActiveEnvironment = useEnvironmentStore((s) => s.setActiveEnvironment);
   const upsertVariable = useEnvironmentStore((s) => s.upsertVariable);
+  const mergeImportedEnvironments = useEnvironmentStore((s) => s.mergeImported);
 
   const collapsed = useUiStore((s) => s.collapsedContainers);
   const toggleContainerCollapsed = useUiStore((s) => s.toggleContainerCollapsed);
@@ -642,6 +644,18 @@ export function CollectionsPanel() {
     const native = parseCollectionExport(raw);
     if (native.ok && native.data) {
       importCollectionExport(native.data);
+      return;
+    }
+
+    // Not a collection/folder export — try it as an ApiTab environment
+    // export (see features/environments/EnvironmentsPanel.tsx for the
+    // dedicated import button; this lets the same file also work from the
+    // general "Import collection" picker).
+    const nativeEnv = parseEnvironmentExport(raw);
+    if (nativeEnv.ok && nativeEnv.data) {
+      const env = exportToEnvironment(nativeEnv.data);
+      mergeImportedEnvironments([env]);
+      toast.success(`Imported "${env.name}" with ${env.variables.length} variables`);
       return;
     }
 
