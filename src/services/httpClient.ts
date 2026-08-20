@@ -14,7 +14,14 @@ function classifyError(err: unknown): ApiError {
       type: 'network',
       message: detail
         ? `Network error: ${detail}`
-        : 'Network error — the host may be unreachable, the DNS lookup failed, or the request was blocked.',
+        : // Unlike the desktop app's Node-based request layer, the browser
+          // gives extensions no way to distinguish a TLS certificate failure
+          // from any other network error, or to bypass one — that's a
+          // browser-level security boundary no extension API can override.
+          // If this is a local dev server with a self-signed certificate,
+          // visiting its URL directly in a browser tab once and accepting
+          // the security warning there is the actual workaround.
+          'Network error — the host may be unreachable, the DNS lookup failed, the request was blocked, or (for a local HTTPS server with a self-signed certificate) the browser doesn\'t trust it yet. For the last case, open the URL directly in a browser tab once and accept the security warning there.',
     };
   }
   return { type: 'unknown', message: (err as Error)?.message ?? 'Unknown error' };
