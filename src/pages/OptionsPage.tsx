@@ -43,6 +43,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoginDialog } from '@/features/account/LoginDialog';
 import { ChangePasswordDialog } from '@/features/account/ChangePasswordDialog';
 import { ABOUT } from '@/config/about';
+import { exportLogsAsText } from '@/utils/logger';
 import {
   backupFilename,
   buildBackup,
@@ -251,6 +252,20 @@ export function OptionsPage() {
     });
     downloadJson(backupFilename(), data);
     toast.success('Backup exported');
+  };
+
+  const exportLogs = async () => {
+    const text = await exportLogsAsText();
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `apitab-logs-${new Date().toISOString().slice(0, 10)}.log`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast.success('Logs exported');
   };
 
   const importData = async (file: File) => {
@@ -713,6 +728,23 @@ export function OptionsPage() {
                       </li>
                     ))}
                   </ul>
+                </div>
+
+                <div>
+                  <GroupLabel>Diagnostics</GroupLabel>
+                  <div className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 px-3.5 py-3 dark:border-slate-700">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-200">Error logs</p>
+                      <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                        Unexpected errors are recorded automatically, kept for 3 days — export as a
+                        file to attach when reporting a bug.
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => void exportLogs()} className="shrink-0">
+                      <Download className="h-3.5 w-3.5" />
+                      Export logs
+                    </Button>
+                  </div>
                 </div>
 
                 <p className="text-xs text-slate-400">

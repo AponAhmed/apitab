@@ -2,10 +2,15 @@ import { EXECUTE_REQUEST, type RuntimeMessage } from '@/services/messaging';
 import { executeHttp } from '@/services/httpClient';
 import { openWorkspace } from '@/services/workspace';
 import { initSyncService, runAllTeamsSync } from '@/services/syncService';
+import { installRuntimeLogging } from '@/utils/logger';
 
 const SYNC_ALARM = 'apitab:poll-sync';
 
 export default defineBackground(() => {
+  // The service worker has no React tree (no error boundary applies here) —
+  // this is its only safety net for an otherwise-uncaught bug.
+  installRuntimeLogging('background');
+
   // Execute API requests on behalf of the UI (bypasses page CORS).
   browser.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
     if (message?.type === EXECUTE_REQUEST) {
