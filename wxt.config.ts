@@ -1,6 +1,19 @@
 import { defineConfig } from 'wxt';
 import tailwindcss from '@tailwindcss/vite';
 
+// The Chrome Web Store rejects any manifest containing "key" outright ("key field is
+// not allowed in manifest") — it assigns its own permanent ID on first upload instead.
+// `npm run build:webstore` / `zip:webstore` set this so that build omits it, while the
+// normal build/zip keep pinning the ID below for sideloaded/dev installs.
+//
+// IMPORTANT: once uploaded, the Store assigns a new, different extension ID, which
+// changes the Google Sign-In redirect URI (see src/services/googleOAuth.ts —
+// `https://<id>.chromiumapp.org/`). That new URI must be added as an Authorized
+// redirect URI on the Google OAuth client (405992136210-fss5livogbvvokl46bdlt839gj8sg3m5
+// .apps.googleusercontent.com) in Google Cloud Console, or sign-in will fail for
+// Store-installed users with a redirect_uri_mismatch.
+const forWebStore = /^(?:build|zip):webstore$/.test(process.env.npm_lifecycle_event ?? '');
+
 // WXT configuration — https://wxt.dev/api/config.html
 export default defineConfig({
   srcDir: 'src',
@@ -24,7 +37,7 @@ export default defineConfig({
     // time. This is the *public* half of a keypair generated once — losing
     // the private half only matters if this extension is later packed into a
     // signed .crx or uploaded as the very first Chrome Web Store version.
-    ...(browser !== 'firefox'
+    ...(browser !== 'firefox' && !forWebStore
       ? {
           key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsy1UiholtHg/WK6omvoxZpMESHdWbemCh8YLBSTlnqFmrmQvEvdBrjkz0Jpnwu8rsqmNAJaMDIeX0GB+S91H1sC4AKaqqNT5IuPb1zg58ImLiZCOLEhUCeBx3iquBzrwh+Cw7QOXRb1qDy/4A/nKkchJsZgCQa63SleS3DQoxrOjUkxlvy0gR6Rw551sGAU0OxWa3Kz+0p81VsSkS7NVwo2DX4ZmdaVwF9HLCnA0xW00KCCdmUoqEUK03ict1BfeiLE3tT61T6m+vGEPnaMe6u+K865c8B45dvidnuxj9Y20caCKO3Xfoh55NudJ7u1aUWKRgD6a7gmPURaoQCF0yQIDAQAB',
         }

@@ -10,8 +10,10 @@
     "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
+    "build:webstore": "wxt build",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
+    "zip:webstore": "wxt zip",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare"
   },
